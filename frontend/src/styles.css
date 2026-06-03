@@ -156,6 +156,40 @@ textarea {
   color: #8ea0b6;
 }
 
+.runtime-status {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 8px;
+  color: #aab7c8;
+  font-size: 0.86rem;
+}
+
+.runtime-status span:last-child {
+  color: #f4f7fb;
+}
+
+.status-light {
+  width: 0.58rem;
+  height: 0.58rem;
+  border-radius: 999px;
+  background: #8ea0b6;
+}
+
+.status-light.ok {
+  background: #62d6d2;
+  box-shadow: 0 0 14px rgba(98, 214, 210, 0.5);
+}
+
+.status-light.pending {
+  background: #f1c453;
+}
+
+.status-light.error {
+  background: #8f3f4b;
+}
+
 .voice-controls {
   display: flex;
   gap: 8px;
@@ -305,6 +339,16 @@ textarea {
 .empty-state,
 .error {
   color: #aab7c8;
+}
+
+.provider-notice {
+  max-width: 760px;
+  margin: 0;
+  padding: 10px 12px;
+  color: #f4f7fb;
+  background: rgba(143, 63, 75, 0.12);
+  border: 1px solid rgba(143, 63, 75, 0.45);
+  border-radius: 8px;
 }
 
 .settings-list {

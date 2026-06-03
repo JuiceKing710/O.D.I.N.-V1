@@ -1,7 +1,7 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useSpeechRecognition } from "../hooks/useSpeechRecognition.js";
 import { useSpeechSynthesis } from "../hooks/useSpeechSynthesis.js";
-import { sendChatMessage } from "../ipc/apiClient.js";
+import { fetchModels, sendChatMessage } from "../ipc/apiClient.js";
 import { useChatStore } from "../state/chatStore.js";
 
 export function ChatView() {
@@ -9,6 +9,11 @@ export function ChatView() {
   const [voiceEnabled, setVoiceEnabled] = useState(true);
   const [speakingMessageId, setSpeakingMessageId] = useState("");
   const [voiceNotice, setVoiceNotice] = useState("");
+  const [providerStatus, setProviderStatus] = useState({
+    error: "",
+    loading: true,
+    provider: null,
+  });
   const messages = useChatStore((state) => state.messages);
   const addMessage = useChatStore((state) => state.addMessage);
   const voiceState = useChatStore((state) => state.voiceState);
@@ -28,6 +33,39 @@ export function ChatView() {
       void sendMessage(text);
     },
   });
+  const provider = providerStatus.provider;
+  const providerAvailable = Boolean(provider?.available);
+  const providerState = providerStatus.loading ? "pending" : providerAvailable ? "ok" : "error";
+  const providerLabel = provider?.provider || "provider";
+  const modelLabel = provider?.selected_model || "no model selected";
+  const providerMessage =
+    provider?.error || providerStatus.error || "Language model provider is unavailable.";
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchModels()
+      .then((response) => {
+        if (!cancelled) {
+          setProviderStatus({
+            error: "",
+            loading: false,
+            provider: response.provider,
+          });
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setProviderStatus({
+            error: error.message,
+            loading: false,
+            provider: null,
+          });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   function speakMessage(message) {
     if (!message?.content) {
@@ -90,6 +128,11 @@ export function ChatView() {
             Voice {speech.available ? "ready" : "unavailable"}{" "}
             {speech.voiceName ? `with ${speech.voiceName}` : ""}
           </p>
+          <div className="runtime-status" aria-label="Runtime status">
+            <span className={`status-light ${providerState}`} />
+            <span>{providerStatus.loading ? "Checking Ollama" : providerLabel}</span>
+            <span>{modelLabel}</span>
+          </div>
         </div>
         <div className="voice-controls" aria-label="Voice controls">
           <button
@@ -138,6 +181,9 @@ export function ChatView() {
         </div>
       </header>
       {voiceNotice && <p className="voice-notice">{voiceNotice}</p>}
+      {!providerStatus.loading && !providerAvailable && (
+        <p className="error provider-notice">{providerMessage}</p>
+      )}
       {recognition.error && <p className="voice-notice">{recognition.error}</p>}
       {recognition.transcript && (
         <div className="dictation-preview">
