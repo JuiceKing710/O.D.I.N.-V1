@@ -87,8 +87,17 @@ class ModelInfo(BaseModel):
     loaded: bool = False
 
 
+class ProviderStatusResponse(BaseModel):
+    provider: str
+    base_url: str | None = None
+    available: bool
+    selected_model: str | None = None
+    error: str | None = None
+
+
 class ModelsResponse(BaseModel):
     models: list[ModelInfo]
+    provider: ProviderStatusResponse | None = None
 
 
 class ModelLoadRequest(BaseModel):

@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import tempfile
 import unittest
+import urllib.error
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 from jarvis.backend.bots.base import Bot, BotRequest, BotResponse
 from jarvis.backend.bots.code_bot import CodeBot
 from jarvis.backend.core.bot_manager import BotManager, BotMessage
 from jarvis.backend.core.jarvis_core import JarvisCore
-from jarvis.backend.core.lm_provider import EchoLMProvider
+from jarvis.backend.core.lm_provider import EchoLMProvider, OllamaProvider
 from jarvis.backend.core.memory_manager import MemoryManager
 from jarvis.backend.core.vector_store import InMemoryVectorStore, VectorStoreInterface
 from jarvis.backend.core.voice_manager import InterruptionConfig, VoiceManager, VoiceState
@@ -56,6 +59,20 @@ class SlowBot(Bot):
         self.attempts += 1
         await asyncio.sleep(0.05)
         return BotResponse(ok=True)
+
+
+class MockHttpResponse:
+    def __init__(self, body: dict[str, Any]) -> None:
+        self.body = json.dumps(body).encode("utf-8")
+
+    def __enter__(self) -> "MockHttpResponse":
+        return self
+
+    def __exit__(self, exc_type, exc, traceback) -> None:
+        return None
+
+    def read(self) -> bytes:
+        return self.body
 
 
 class CoreTests(unittest.TestCase):
@@ -192,6 +209,86 @@ class CoreTests(unittest.TestCase):
 
         self.assertEqual(summary.reflection_id, summaries[0].reflection_id)
         self.assertIn("I heard", summaries[0].summary)
+
+    def test_ollama_provider_parses_models_and_selects_first(self) -> None:
+        provider = OllamaProvider()
+
+        with patch(
+            "urllib.request.urlopen",
+            return_value=MockHttpResponse(
+                {"models": [{"name": "llama3.2:latest"}, {"name": "mistral:latest"}]}
+            ),
+        ):
+            models = asyncio.run(provider.list_models())
+            status = asyncio.run(provider.status())
+
+        self.assertEqual(models[0].id, "llama3.2:latest")
+        self.assertTrue(models[0].loaded)
+        self.assertEqual(status.selected_model, "llama3.2:latest")
+        self.assertTrue(status.available)
+
+    def test_ollama_provider_honors_configured_model(self) -> None:
+        provider = OllamaProvider(model="mistral:latest")
+
+        with patch(
+            "urllib.request.urlopen",
+            return_value=MockHttpResponse(
+                {"models": [{"name": "llama3.2:latest"}, {"name": "mistral:latest"}]}
+            ),
+        ):
+            models = asyncio.run(provider.list_models())
+
+        loaded = [model for model in models if model.loaded]
+        self.assertEqual(loaded[0].id, "mistral:latest")
+
+    def test_ollama_provider_reports_unreachable_server(self) -> None:
+        provider = OllamaProvider()
+
+        with patch(
+            "urllib.request.urlopen",
+            side_effect=urllib.error.URLError("connection refused"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "ollama serve"):
+                asyncio.run(provider.generate("hello", []))
+
+    def test_ollama_provider_reports_no_models(self) -> None:
+        provider = OllamaProvider()
+
+        with patch("urllib.request.urlopen", return_value=MockHttpResponse({"models": []})):
+            with self.assertRaisesRegex(RuntimeError, "ollama pull"):
+                asyncio.run(provider.generate("hello", []))
+
+    def test_ollama_provider_reports_missing_configured_model(self) -> None:
+        provider = OllamaProvider(model="missing:latest")
+
+        with patch(
+            "urllib.request.urlopen",
+            return_value=MockHttpResponse({"models": [{"name": "llama3.2:latest"}]}),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "missing:latest"):
+                asyncio.run(provider.generate("hello", []))
+
+    def test_ollama_provider_sends_chat_payload_with_context(self) -> None:
+        provider = OllamaProvider()
+        seen_payloads = []
+
+        def fake_urlopen(request, timeout):
+            if request.full_url.endswith("/api/tags"):
+                return MockHttpResponse({"models": [{"name": "llama3.2:latest"}]})
+            seen_payloads.append(json.loads(request.data.decode("utf-8")))
+            return MockHttpResponse({"message": {"content": "Hello. I am Jarvis."}})
+
+        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            reply = asyncio.run(provider.generate("hello", ["user likes concise answers"]))
+
+        self.assertEqual(reply, "Hello. I am Jarvis.")
+        payload = seen_payloads[0]
+        self.assertEqual(payload["model"], "llama3.2:latest")
+        self.assertFalse(payload["stream"])
+        self.assertEqual(payload["messages"][0]["role"], "system")
+        self.assertIn("Jarvis", payload["messages"][0]["content"])
+        self.assertIn("memory context", payload["messages"][1]["content"])
+        self.assertEqual(payload["messages"][-1]["content"], "hello")
 
 
 if __name__ == "__main__":

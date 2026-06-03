@@ -49,6 +49,11 @@ async def chat(request: ChatRequest, core: JarvisCore = Depends(get_core)) -> Ch
     except ValueError as exc:
         status_code = 404 if "Conversation not found" in str(exc) else 400
         raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Language model provider unavailable: {exc}",
+        ) from exc
     return ChatResponse(**result)
 
 
@@ -116,16 +121,29 @@ def update_settings(
 @router.get("/models", response_model=ModelsResponse)
 async def list_models(core: JarvisCore = Depends(get_core)) -> ModelsResponse:
     models = await core.lm_provider.list_models()
-    return ModelsResponse(models=[asdict(model) for model in models])
+    status = await core.lm_provider.status()
+    return ModelsResponse(
+        models=[asdict(model) for model in models],
+        provider=asdict(status),
+    )
 
 
 @router.post("/models/load", response_model=ModelsResponse)
 async def load_model(
     request: ModelLoadRequest, core: JarvisCore = Depends(get_core)
 ) -> ModelsResponse:
-    await core.lm_provider.load_model(request.model_name)
+    try:
+        await core.lm_provider.load_model(request.model_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     models = await core.lm_provider.list_models()
-    return ModelsResponse(models=[asdict(model) for model in models])
+    status = await core.lm_provider.status()
+    return ModelsResponse(
+        models=[asdict(model) for model in models],
+        provider=asdict(status),
+    )
 
 
 @router.get("/events/history", response_model=list[EventResponse])

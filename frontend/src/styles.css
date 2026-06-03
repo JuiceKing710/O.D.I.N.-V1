@@ -227,6 +227,55 @@ textarea {
   cursor: pointer;
 }
 
+.inline-form button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.provider-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.provider-status strong {
+  text-transform: capitalize;
+}
+
+.provider-status small,
+.setting-note {
+  color: #8ea0b6;
+}
+
+.status-ok,
+.status-error {
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 0.78rem;
+}
+
+.status-ok {
+  color: #11151c;
+  background: #62d6d2;
+}
+
+.status-error {
+  color: #f4f7fb;
+  background: #8f3f4b;
+}
+
+.command-help {
+  max-width: 32rem;
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  overflow-x: auto;
+  color: #f1c453;
+  background: #10141a;
+  border: 1px solid #2a3340;
+  border-radius: 8px;
+}
+
 .task-list {
   display: grid;
   gap: 12px;

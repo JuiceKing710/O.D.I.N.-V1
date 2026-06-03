@@ -16,7 +16,7 @@ This initial build includes:
 - Electron desktop wrapper around the built React app.
 - Unit and API tests for core message handling, persistence, bot dispatch, permissions, CORS, tasks, and settings.
 
-Heavy runtime integrations such as Whisper, Piper/Kokoro, ChromaDB, and LM Studio are represented by adapters and interfaces so they can be implemented safely behind stable contracts.
+Heavy runtime integrations such as Whisper, Piper/Kokoro, and ChromaDB are represented by adapters and interfaces so they can be implemented safely behind stable contracts. Ollama is the default local LLM provider.
 
 ## Backend
 
@@ -25,6 +25,20 @@ python -m venv .venv
 . .venv/bin/activate
 pip install -e ".[dev]"
 uvicorn jarvis.backend.api.main:app --reload
+```
+
+Jarvis expects Ollama at `http://127.0.0.1:11434` by default. In a separate terminal, start Ollama and install at least one model:
+
+```bash
+ollama serve
+ollama pull llama3.2
+```
+
+Override Ollama settings with:
+
+```bash
+export OLLAMA_BASE_URL=http://127.0.0.1:11434
+export OLLAMA_MODEL=llama3.2
 ```
 
 The backend defaults to a SQLite database at `data/jarvis.db`. Override it with:

@@ -18,13 +18,43 @@ from jarvis.backend.core.app_factory import (
 from jarvis.backend.core.bot_manager import BotManager
 from jarvis.backend.core.event_bus import EventBus
 from jarvis.backend.core.jarvis_core import JarvisCore
-from jarvis.backend.core.lm_provider import EchoLMProvider
+from jarvis.backend.core.lm_provider import EchoLMProvider, ModelInfo, ProviderStatus
 from jarvis.backend.core.memory_manager import MemoryManager
 from jarvis.backend.core.recovery_manager import RecoveryManager
 from jarvis.backend.core.settings_store import SettingsStore
 from jarvis.backend.core.vector_store import NullVectorStore
 from jarvis.backend.utils.audit_logging import AuditLogger
 from jarvis.backend.utils.permissions import Permission, PermissionDecision, PermissionManager
+
+
+class FailingLMProvider(EchoLMProvider):
+    async def generate(self, text, context, metadata=None) -> str:
+        raise RuntimeError("Ollama is not running at http://127.0.0.1:11434. Run `ollama serve`.")
+
+    async def list_models(self) -> list[ModelInfo]:
+        return []
+
+    async def status(self) -> ProviderStatus:
+        return ProviderStatus(
+            provider="ollama",
+            base_url="http://127.0.0.1:11434",
+            available=False,
+            selected_model=None,
+            error="Ollama is not running at http://127.0.0.1:11434. Run `ollama serve`.",
+        )
+
+
+class StatusLMProvider(EchoLMProvider):
+    async def list_models(self) -> list[ModelInfo]:
+        return [ModelInfo(id="llama3.2:latest", provider="ollama", loaded=True)]
+
+    async def status(self) -> ProviderStatus:
+        return ProviderStatus(
+            provider="ollama",
+            base_url="http://127.0.0.1:11434",
+            available=True,
+            selected_model="llama3.2:latest",
+        )
 
 
 class ApiTests(unittest.TestCase):
@@ -73,6 +103,18 @@ class ApiTests(unittest.TestCase):
         body = response.json()
         self.assertEqual(body["conversation_id"], 1)
         self.assertIn("I heard: hello from api", body["reply"])
+
+    def test_chat_endpoint_reports_lm_provider_failure(self) -> None:
+        self.core.lm_provider = FailingLMProvider()
+
+        response = self.client.post(
+            "/api/v1/chat",
+            json={"message": "hello from api", "username": "api-user"},
+        )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("Language model provider unavailable", response.json()["detail"])
+        self.assertIn("ollama serve", response.json()["detail"])
 
     def test_task_endpoints_create_and_list_tasks(self) -> None:
         created = self.client.post(
@@ -137,6 +179,19 @@ class ApiTests(unittest.TestCase):
         body = response.json()
         self.assertEqual(body["models"][0]["id"], "echo-alt")
         self.assertTrue(body["models"][0]["loaded"])
+        self.assertEqual(body["provider"]["provider"], "builtin")
+
+    def test_models_endpoint_reports_provider_status(self) -> None:
+        self.core.lm_provider = StatusLMProvider()
+
+        response = self.client.get("/api/v1/models")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["provider"]["provider"], "ollama")
+        self.assertTrue(body["provider"]["available"])
+        self.assertEqual(body["provider"]["selected_model"], "llama3.2:latest")
+        self.assertEqual(body["models"][0]["provider"], "ollama")
 
     def test_websocket_receives_chat_event(self) -> None:
         with self.client.websocket_connect("/api/v1/events") as websocket:

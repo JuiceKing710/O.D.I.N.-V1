@@ -11,7 +11,7 @@ from jarvis.backend.bots.system_bot import SystemBot
 from jarvis.backend.core.bot_manager import BotManager
 from jarvis.backend.core.event_bus import EventBus
 from jarvis.backend.core.jarvis_core import JarvisCore
-from jarvis.backend.core.lm_provider import EchoLMProvider, LMStudioProvider
+from jarvis.backend.core.lm_provider import EchoLMProvider, OllamaProvider
 from jarvis.backend.core.memory_manager import MemoryManager
 from jarvis.backend.core.recovery_manager import RecoveryManager
 from jarvis.backend.core.settings_store import SettingsStore
@@ -84,8 +84,13 @@ def get_core() -> JarvisCore:
     bot_manager.register(CodeBot(permission_manager, audit_logger))
     bot_manager.register(SystemBot(permission_manager, audit_logger))
 
-    lm_base_url = os.environ.get("LM_STUDIO_BASE_URL")
-    lm_provider = LMStudioProvider(lm_base_url) if lm_base_url else EchoLMProvider()
+    if os.environ.get("JARVIS_LLM_PROVIDER") == "echo":
+        lm_provider = EchoLMProvider()
+    else:
+        lm_provider = OllamaProvider(
+            base_url=os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434"),
+            model=os.environ.get("OLLAMA_MODEL"),
+        )
     return JarvisCore(
         memory=memory,
         bot_manager=bot_manager,

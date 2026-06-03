@@ -9,7 +9,14 @@ async function request(path, options = {}) {
     ...options,
   });
   if (!response.ok) {
-    throw new Error(`Request failed: ${response.status}`);
+    let detail = `Request failed: ${response.status}`;
+    try {
+      const body = await response.json();
+      detail = body.detail || detail;
+    } catch {
+      // Keep the status-only message when the server does not return JSON.
+    }
+    throw new Error(detail);
   }
   return response.json();
 }
