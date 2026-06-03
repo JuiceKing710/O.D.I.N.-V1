@@ -392,10 +392,42 @@ textarea {
   border-radius: 8px;
 }
 
+.settings-grid {
+  display: grid;
+  gap: 16px;
+}
+
+.settings-section {
+  display: grid;
+  gap: 14px;
+  max-width: 760px;
+  padding: 16px;
+  background: #171c24;
+  border: 1px solid #2a3340;
+  border-radius: 8px;
+}
+
+.section-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.section-heading h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.section-heading > span:not(.status-ok, .status-error) {
+  color: #8ea0b6;
+}
+
 .settings-list {
   display: grid;
   grid-template-columns: max-content 1fr;
   gap: 8px 16px;
+  margin: 0;
 }
 
 .settings-list dt {
@@ -467,6 +499,36 @@ textarea {
 .status-error {
   color: #f4f7fb;
   background: #8f3f4b;
+}
+
+.permission-list {
+  display: grid;
+  gap: 8px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.permission-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  padding: 10px 12px;
+  background: #10141a;
+  border: 1px solid #2a3340;
+  border-radius: 8px;
+}
+
+.permission-list span {
+  color: #d8e1ec;
+  text-transform: capitalize;
+}
+
+.permission-list strong {
+  color: #62d6d2;
+  font-size: 0.82rem;
+  text-transform: capitalize;
 }
 
 .command-help {

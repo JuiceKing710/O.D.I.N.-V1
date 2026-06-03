@@ -7,6 +7,7 @@ export function SettingsPanel() {
   const [provider, setProvider] = useState(null);
   const [selectedModel, setSelectedModel] = useState("");
   const [error, setError] = useState("");
+  const permissionEntries = Object.entries(settings?.permissions || {});
 
   useEffect(() => {
     Promise.all([fetchSettings(), fetchModels()])
@@ -45,25 +46,31 @@ export function SettingsPanel() {
       </header>
       {error && <p className="error">{error}</p>}
       {settings ? (
-        <dl className="settings-list">
-          <dt>Voice</dt>
-          <dd>{settings.voice_mode}</dd>
-          <dt>Provider</dt>
-          <dd>
-            {provider ? (
-              <div className="provider-status">
-                <strong>{provider.provider}</strong>
+        <div className="settings-grid">
+          <section className="settings-section" aria-label="Model provider">
+            <div className="section-heading">
+              <h2>Model</h2>
+              {provider && (
                 <span className={provider.available ? "status-ok" : "status-error"}>
-                  {provider.available ? "connected" : "offline"}
+                  {provider.available ? "Connected" : "Offline"}
                 </span>
-                {provider.base_url && <small>{provider.base_url}</small>}
-              </div>
-            ) : (
-              "Unknown"
-            )}
-          </dd>
-          <dt>Model</dt>
-          <dd>
+              )}
+            </div>
+            <dl className="settings-list">
+              <dt>Provider</dt>
+              <dd>
+                {provider ? (
+                  <div className="provider-status">
+                    <strong>{provider.provider}</strong>
+                    {provider.base_url && <small>{provider.base_url}</small>}
+                  </div>
+                ) : (
+                  "Unknown"
+                )}
+              </dd>
+              <dt>Selected</dt>
+              <dd>{provider?.selected_model || "No model selected"}</dd>
+            </dl>
             <form className="inline-form" onSubmit={handleModelSubmit}>
               <select
                 aria-label="Model"
@@ -85,18 +92,44 @@ export function SettingsPanel() {
                 Load
               </button>
             </form>
-            {provider?.selected_model && (
-              <p className="setting-note">Selected: {provider.selected_model}</p>
-            )}
             {provider?.error && <p className="error">{provider.error}</p>}
             {provider && !provider.available && (
               <pre className="command-help">{`ollama serve
 ollama pull llama3.2`}</pre>
             )}
-          </dd>
-          <dt>Theme</dt>
-          <dd>{settings.theme}</dd>
-        </dl>
+          </section>
+
+          <section className="settings-section" aria-label="Interface settings">
+            <div className="section-heading">
+              <h2>Interface</h2>
+            </div>
+            <dl className="settings-list">
+              <dt>Voice</dt>
+              <dd>{settings.voice_mode}</dd>
+              <dt>Theme</dt>
+              <dd>{settings.theme}</dd>
+            </dl>
+          </section>
+
+          <section className="settings-section permissions-section" aria-label="Permissions">
+            <div className="section-heading">
+              <h2>Permissions</h2>
+              <span>{permissionEntries.length}</span>
+            </div>
+            {permissionEntries.length ? (
+              <ul className="permission-list">
+                {permissionEntries.map(([name, decision]) => (
+                  <li key={name}>
+                    <span>{name.replaceAll("_", " ")}</span>
+                    <strong>{decision}</strong>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <div className="empty-state">No permission overrides configured.</div>
+            )}
+          </section>
+        </div>
       ) : (
         <div className="empty-state">Loading settings...</div>
       )}
