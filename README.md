@@ -39,6 +39,7 @@ Override Ollama settings with:
 ```bash
 export OLLAMA_BASE_URL=http://127.0.0.1:11434
 export OLLAMA_MODEL=llama3.2
+export OLLAMA_TIMEOUT_SECONDS=120
 ```
 
 The backend defaults to a SQLite database at `data/jarvis.db`. Override it with:

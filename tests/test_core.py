@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 from jarvis.backend.bots.base import Bot, BotRequest, BotResponse
 from jarvis.backend.bots.code_bot import CodeBot
+from jarvis.backend.core.app_factory import _ollama_timeout_seconds
 from jarvis.backend.core.bot_manager import BotManager, BotMessage
 from jarvis.backend.core.jarvis_core import JarvisCore
 from jarvis.backend.core.lm_provider import EchoLMProvider, OllamaProvider
@@ -289,6 +290,10 @@ class CoreTests(unittest.TestCase):
         self.assertIn("Jarvis", payload["messages"][0]["content"])
         self.assertIn("memory context", payload["messages"][1]["content"])
         self.assertEqual(payload["messages"][-1]["content"], "hello")
+
+    def test_ollama_timeout_env_falls_back_when_invalid(self) -> None:
+        with patch.dict("os.environ", {"OLLAMA_TIMEOUT_SECONDS": "not-a-number"}):
+            self.assertEqual(_ollama_timeout_seconds(), 120.0)
 
 
 if __name__ == "__main__":

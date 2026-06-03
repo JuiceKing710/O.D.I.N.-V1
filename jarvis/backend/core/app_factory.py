@@ -28,6 +28,14 @@ def _default_db_path() -> Path:
     return Path(os.environ.get("JARVIS_DB_PATH", "data/jarvis.db"))
 
 
+def _ollama_timeout_seconds() -> float:
+    raw = os.environ.get("OLLAMA_TIMEOUT_SECONDS", "120")
+    try:
+        return float(raw)
+    except ValueError:
+        return 120.0
+
+
 @lru_cache(maxsize=1)
 def get_permission_manager() -> PermissionManager:
     return PermissionManager.from_manifest(PACKAGE_ROOT / "config" / "permissions.json")
@@ -90,6 +98,7 @@ def get_core() -> JarvisCore:
         lm_provider = OllamaProvider(
             base_url=os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434"),
             model=os.environ.get("OLLAMA_MODEL"),
+            timeout_seconds=_ollama_timeout_seconds(),
         )
     return JarvisCore(
         memory=memory,

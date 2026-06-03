@@ -79,7 +79,7 @@ class OllamaProvider(LMProviderInterface):
         self,
         base_url: str = "http://127.0.0.1:11434",
         model: str | None = None,
-        timeout_seconds: float = 30.0,
+        timeout_seconds: float = 120.0,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model.strip() if model and model.strip() else None
