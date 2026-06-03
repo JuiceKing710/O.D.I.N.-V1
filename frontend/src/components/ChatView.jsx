@@ -1,19 +1,27 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useSpeechRecognition } from "../hooks/useSpeechRecognition.js";
 import { useSpeechSynthesis } from "../hooks/useSpeechSynthesis.js";
 import { fetchModels, sendChatMessage } from "../ipc/apiClient.js";
 import { useChatStore } from "../state/chatStore.js";
 
+const MESSAGE_RENDER_LIMIT = 120;
+const SCROLL_BOTTOM_THRESHOLD = 96;
+
 export function ChatView({ onOpenCoreFocus }) {
   const [input, setInput] = useState("");
+  const [isPinnedToLatest, setIsPinnedToLatest] = useState(true);
   const [voiceEnabled, setVoiceEnabled] = useState(true);
   const [speakingMessageId, setSpeakingMessageId] = useState("");
+  const [showJumpLatest, setShowJumpLatest] = useState(false);
   const [voiceNotice, setVoiceNotice] = useState("");
   const [providerStatus, setProviderStatus] = useState({
     error: "",
     loading: true,
     provider: null,
   });
+  const inputRef = useRef(null);
+  const messageEndRef = useRef(null);
+  const messageListRef = useRef(null);
   const messages = useChatStore((state) => state.messages);
   const addMessage = useChatStore((state) => state.addMessage);
   const voiceState = useChatStore((state) => state.voiceState);
@@ -40,6 +48,8 @@ export function ChatView({ onOpenCoreFocus }) {
   const modelLabel = provider?.selected_model || "no model selected";
   const providerMessage =
     provider?.error || providerStatus.error || "Language model provider is unavailable.";
+  const visibleMessages = messages.slice(-MESSAGE_RENDER_LIMIT);
+  const hiddenMessageCount = Math.max(messages.length - visibleMessages.length, 0);
 
   useEffect(() => {
     let cancelled = false;
@@ -66,6 +76,38 @@ export function ChatView({ onOpenCoreFocus }) {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (isPinnedToLatest) {
+      messageEndRef.current?.scrollIntoView({ block: "end" });
+      setShowJumpLatest(false);
+    }
+  }, [isPinnedToLatest, messages.length]);
+
+  function isNearMessageListBottom(element) {
+    return (
+      element.scrollHeight - element.scrollTop - element.clientHeight <= SCROLL_BOTTOM_THRESHOLD
+    );
+  }
+
+  function handleMessageScroll() {
+    const list = messageListRef.current;
+    if (!list) {
+      return;
+    }
+    const nearBottom = isNearMessageListBottom(list);
+    setIsPinnedToLatest(nearBottom);
+    setShowJumpLatest(!nearBottom && messages.length > 0);
+  }
+
+  function jumpToLatest() {
+    setIsPinnedToLatest(true);
+    setShowJumpLatest(false);
+    requestAnimationFrame(() => {
+      messageEndRef.current?.scrollIntoView({ block: "end" });
+      inputRef.current?.focus();
+    });
+  }
 
   function speakMessage(message) {
     if (!message?.content) {
@@ -111,6 +153,8 @@ export function ChatView({ onOpenCoreFocus }) {
     } catch (error) {
       addMessage({ role: "assistant", content: error.message });
       setVoiceState("idle");
+    } finally {
+      inputRef.current?.focus();
     }
   }
 
@@ -194,31 +238,50 @@ export function ChatView({ onOpenCoreFocus }) {
           <p>{recognition.transcript}</p>
         </div>
       )}
-      <div className="message-list" aria-live="polite">
-        {messages.map((message) => (
-          <article key={message.id} className={`message ${message.role}`}>
-            <div className="message-meta">
-              <span>{message.role}</span>
-              {message.role === "assistant" && (
-                <button
-                  type="button"
-                  onClick={() =>
-                    speakingMessageId === message.id ? stopSpeech() : speakMessage(message)
-                  }
-                  disabled={!speech.available}
-                >
-                  {speakingMessageId === message.id && speech.speaking ? "Stop" : "Speak"}
-                </button>
-              )}
+      <div className="message-stage">
+        <div
+          className="message-list"
+          aria-live="polite"
+          onScroll={handleMessageScroll}
+          ref={messageListRef}
+        >
+          {hiddenMessageCount > 0 && (
+            <div className="message-window-note">
+              Showing latest {visibleMessages.length} of {messages.length} messages
             </div>
-            <p>{message.content}</p>
-          </article>
-        ))}
+          )}
+          {visibleMessages.map((message) => (
+            <article key={message.id} className={`message ${message.role}`}>
+              <div className="message-meta">
+                <span>{message.role}</span>
+                {message.role === "assistant" && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      speakingMessageId === message.id ? stopSpeech() : speakMessage(message)
+                    }
+                    disabled={!speech.available}
+                  >
+                    {speakingMessageId === message.id && speech.speaking ? "Stop" : "Speak"}
+                  </button>
+                )}
+              </div>
+              <p>{message.content}</p>
+            </article>
+          ))}
+          <div ref={messageEndRef} />
+        </div>
+        {showJumpLatest && (
+          <button className="jump-latest" type="button" onClick={jumpToLatest}>
+            Latest
+          </button>
+        )}
       </div>
       <form className="composer" onSubmit={handleSubmit}>
         <label htmlFor="chat-input">Message</label>
         <textarea
           id="chat-input"
+          ref={inputRef}
           value={input}
           onChange={(event) => setInput(event.target.value)}
           rows={3}
