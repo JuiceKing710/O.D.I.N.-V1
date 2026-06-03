@@ -107,20 +107,60 @@ textarea {
 }
 
 .tab {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
   padding: 10px 12px;
   color: #d8e1ec;
   text-align: left;
-  text-transform: capitalize;
   background: transparent;
   border: 1px solid transparent;
   border-radius: 8px;
   cursor: pointer;
 }
 
+.tab strong {
+  min-width: 1.5rem;
+  padding: 2px 7px;
+  color: #11151c;
+  font-size: 0.78rem;
+  text-align: center;
+  background: #62d6d2;
+  border-radius: 999px;
+}
+
 .tab.active,
 .tab:focus-visible {
   border-color: #62d6d2;
   outline: none;
+}
+
+.sidebar-status {
+  display: grid;
+  gap: 10px;
+  margin: auto 0 0;
+  padding: 12px;
+  background: rgba(16, 20, 26, 0.58);
+  border: 1px solid #2a3340;
+  border-radius: 8px;
+}
+
+.sidebar-status div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.sidebar-status dt {
+  color: #8ea0b6;
+}
+
+.sidebar-status dd {
+  margin: 0;
+  color: #f4f7fb;
+  text-transform: capitalize;
 }
 
 .panel {
@@ -536,6 +576,22 @@ textarea {
   }
 
   .tab {
+    justify-content: center;
+    text-align: center;
+  }
+
+  .tab strong {
+    display: none;
+  }
+
+  .sidebar-status {
+    grid-template-columns: repeat(3, 1fr);
+    margin-top: 0;
+  }
+
+  .sidebar-status div {
+    display: grid;
+    gap: 4px;
     text-align: center;
   }
 

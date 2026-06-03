@@ -8,10 +8,22 @@ import { connectEvents } from "./ipc/apiClient.js";
 import { useChatStore } from "./state/chatStore.js";
 import "./styles.css";
 
+const PANELS = [
+  { id: "chat", label: "Chat" },
+  { id: "projects", label: "Projects" },
+  { id: "settings", label: "Settings" },
+];
+
 function App() {
   const [activePanel, setActivePanel] = useState("chat");
+  const messages = useChatStore((state) => state.messages);
+  const tasks = useChatStore((state) => state.tasks);
   const voiceState = useChatStore((state) => state.voiceState);
   const applyEvent = useChatStore((state) => state.applyEvent);
+  const panelCounts = {
+    chat: messages.length,
+    projects: tasks.length,
+  };
 
   useEffect(() => connectEvents(applyEvent), [applyEvent]);
 
@@ -20,17 +32,32 @@ function App() {
       <aside className="sidebar" aria-label="Jarvis navigation">
         <AICore state={voiceState} />
         <nav className="tabs" aria-label="Primary">
-          {["chat", "projects", "settings"].map((panel) => (
+          {PANELS.map((panel) => (
             <button
-              key={panel}
-              className={activePanel === panel ? "tab active" : "tab"}
-              onClick={() => setActivePanel(panel)}
+              key={panel.id}
+              className={activePanel === panel.id ? "tab active" : "tab"}
+              onClick={() => setActivePanel(panel.id)}
               type="button"
             >
-              {panel}
+              <span>{panel.label}</span>
+              {panelCounts[panel.id] > 0 && <strong>{panelCounts[panel.id]}</strong>}
             </button>
           ))}
         </nav>
+        <dl className="sidebar-status" aria-label="Session status">
+          <div>
+            <dt>Voice</dt>
+            <dd>{voiceState}</dd>
+          </div>
+          <div>
+            <dt>Messages</dt>
+            <dd>{messages.length}</dd>
+          </div>
+          <div>
+            <dt>Projects</dt>
+            <dd>{tasks.length}</dd>
+          </div>
+        </dl>
       </aside>
       <section className="workspace">
         {activePanel === "chat" && <ChatView />}
