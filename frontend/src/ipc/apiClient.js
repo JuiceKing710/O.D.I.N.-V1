@@ -65,6 +65,18 @@ export function createTask({ name, description = "", username = "local-user" }) 
   });
 }
 
+export function updateTask({ taskId, name, description, status, username = "local-user" }) {
+  return request(`/api/v1/tasks/${taskId}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      description,
+      name,
+      status,
+      username,
+    }),
+  });
+}
+
 export function loadModel(modelName) {
   return request("/api/v1/models/load", {
     method: "POST",

@@ -128,6 +128,38 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(listed.status_code, 200)
         self.assertEqual(len(listed.json()), 1)
 
+    def test_task_endpoint_updates_status_and_description(self) -> None:
+        created = self.client.post(
+            "/api/v1/tasks",
+            json={"username": "api-user", "name": "Ship scaffold", "description": "baseline"},
+        )
+
+        updated = self.client.patch(
+            f"/api/v1/tasks/{created.json()['task_id']}",
+            json={
+                "username": "api-user",
+                "description": "notes updated",
+                "status": "in_progress",
+            },
+        )
+
+        self.assertEqual(updated.status_code, 200)
+        self.assertEqual(updated.json()["description"], "notes updated")
+        self.assertEqual(updated.json()["status"], "in_progress")
+
+    def test_task_update_rejects_wrong_user(self) -> None:
+        created = self.client.post(
+            "/api/v1/tasks",
+            json={"username": "owner-user", "name": "Private task"},
+        )
+
+        response = self.client.patch(
+            f"/api/v1/tasks/{created.json()['task_id']}",
+            json={"username": "other-user", "status": "complete"},
+        )
+
+        self.assertEqual(response.status_code, 404)
+
     def test_bot_endpoint_returns_404_for_unknown_bot(self) -> None:
         response = self.client.post(
             "/api/v1/bot/missing/exec",
@@ -164,6 +196,18 @@ class ApiTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers["access-control-allow-origin"], "http://127.0.0.1:4173")
+
+    def test_local_frontend_cors_allows_task_patch(self) -> None:
+        response = self.client.options(
+            "/api/v1/tasks/1",
+            headers={
+                "Origin": "http://127.0.0.1:5173",
+                "Access-Control-Request-Method": "PATCH",
+                "Access-Control-Request-Headers": "content-type",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("PATCH", response.headers["access-control-allow-methods"])
 
     def test_invalid_conversation_returns_404(self) -> None:
         response = self.client.post(

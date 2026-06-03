@@ -75,6 +75,13 @@ class TaskCreateRequest(BaseModel):
     username: str = Field(default="local-user", min_length=1)
 
 
+class TaskUpdateRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1)
+    description: str | None = None
+    status: Literal["pending", "in_progress", "complete"] | None = None
+    username: str = Field(default="local-user", min_length=1)
+
+
 class TaskResponse(BaseModel):
     task_id: int
     user_id: int

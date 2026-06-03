@@ -23,6 +23,7 @@ from jarvis.backend.api.models import (
     SettingsUpdateRequest,
     TaskCreateRequest,
     TaskResponse,
+    TaskUpdateRequest,
 )
 from jarvis.backend.core.app_factory import (
     get_core,
@@ -134,6 +135,29 @@ def create_task(
     user = core.memory.get_or_create_user(request.username)
     task = core.memory.create_task(user.user_id, request.name, request.description)
     event_bus.publish("task.updated", {"task": task.to_api(), "action": "created"})
+    return TaskResponse(**task.to_api())
+
+
+@router.patch("/tasks/{task_id}", response_model=TaskResponse)
+def update_task(
+    task_id: int,
+    request: TaskUpdateRequest,
+    core: JarvisCore = Depends(get_core),
+    event_bus: EventBus = Depends(get_event_bus),
+) -> TaskResponse:
+    user = core.memory.get_or_create_user(request.username)
+    try:
+        task = core.memory.update_task(
+            user.user_id,
+            task_id,
+            description=request.description,
+            name=request.name,
+            status=request.status,
+        )
+    except ValueError as exc:
+        status_code = 404 if "Task not found" in str(exc) else 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+    event_bus.publish("task.updated", {"task": task.to_api(), "action": "updated"})
     return TaskResponse(**task.to_api())
 
 

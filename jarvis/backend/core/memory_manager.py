@@ -314,6 +314,55 @@ class MemoryManager:
             ).fetchall()
         return [self._task_from_row(row) for row in rows]
 
+    def update_task(
+        self,
+        user_id: int,
+        task_id: int,
+        *,
+        description: str | None = None,
+        name: str | None = None,
+        status: Literal["pending", "in_progress", "complete"] | None = None,
+    ) -> TaskRecord:
+        updates = []
+        values = []
+        if name is not None:
+            if not name.strip():
+                raise ValueError("task name is required")
+            updates.append("name = ?")
+            values.append(name.strip())
+        if description is not None:
+            updates.append("description = ?")
+            values.append(description.strip() or None)
+        if status is not None:
+            if status not in {"pending", "in_progress", "complete"}:
+                raise ValueError(f"Invalid task status: {status}")
+            updates.append("status = ?")
+            values.append(status)
+        if not updates:
+            raise ValueError("No task updates provided")
+        with self._connect() as conn:
+            cursor = conn.execute(
+                f"""
+                UPDATE tasks
+                SET {", ".join(updates)}
+                WHERE task_id = ? AND user_id = ?
+                """,
+                (*values, task_id, user_id),
+            )
+            if cursor.rowcount == 0:
+                raise ValueError(f"Task not found: {task_id}")
+            row = conn.execute(
+                """
+                SELECT task_id, user_id, name, description, status, created_at
+                FROM tasks
+                WHERE task_id = ? AND user_id = ?
+                """,
+                (task_id, user_id),
+            ).fetchone()
+            task = self._task_from_row(row)
+            self._safe_upsert_task(task)
+        return task
+
     def list_conversation_messages(self, convo_id: int) -> list[MessageRecord]:
         with self._connect() as conn:
             rows = conn.execute(
