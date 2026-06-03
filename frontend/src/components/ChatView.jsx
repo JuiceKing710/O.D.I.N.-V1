@@ -7,6 +7,7 @@ export function ChatView() {
   const [input, setInput] = useState("");
   const [voiceEnabled, setVoiceEnabled] = useState(true);
   const [speakingMessageId, setSpeakingMessageId] = useState("");
+  const [voiceNotice, setVoiceNotice] = useState("");
   const messages = useChatStore((state) => state.messages);
   const addMessage = useChatStore((state) => state.addMessage);
   const voiceState = useChatStore((state) => state.voiceState);
@@ -23,7 +24,12 @@ export function ChatView() {
     if (!message?.content) {
       return;
     }
+    if (!speech.available) {
+      setVoiceNotice("Browser speech is unavailable. Try Chrome or check macOS voice settings.");
+      return;
+    }
     setSpeakingMessageId(message.id || "");
+    setVoiceNotice("");
     speech.speak(message.content);
   }
 
@@ -39,6 +45,7 @@ export function ChatView() {
     if (!text) {
       return;
     }
+    speech.warmUp();
     addMessage({ role: "user", content: text });
     setInput("");
     setVoiceState("thinking");
@@ -76,6 +83,7 @@ export function ChatView() {
             className={voiceEnabled ? "toggle active" : "toggle"}
             type="button"
             onClick={() => {
+              speech.warmUp();
               const next = !voiceEnabled;
               setVoiceEnabled(next);
               if (!next) {
@@ -88,9 +96,24 @@ export function ChatView() {
           <button type="button" onClick={stopSpeech} disabled={!speech.speaking}>
             Stop
           </button>
+          <button
+            type="button"
+            onClick={() => {
+              setVoiceEnabled(true);
+              speakMessage({
+                id: "voice-test",
+                role: "assistant",
+                content: "Jarvis voice test. If you can hear this, speech output is working.",
+              });
+            }}
+            disabled={!speech.available}
+          >
+            Test Voice
+          </button>
           <span className={`voice-pill ${voiceState}`}>{voiceState}</span>
         </div>
       </header>
+      {voiceNotice && <p className="voice-notice">{voiceNotice}</p>}
       <div className="message-list" aria-live="polite">
         {messages.map((message) => (
           <article key={message.id} className={`message ${message.role}`}>

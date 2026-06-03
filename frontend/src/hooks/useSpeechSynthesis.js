@@ -38,12 +38,23 @@ export function useSpeechSynthesis({ onStart, onEnd } = {}) {
     onEnd?.();
   }
 
+  function warmUp() {
+    if (!available) {
+      return;
+    }
+    window.speechSynthesis.resume();
+    const utterance = new SpeechSynthesisUtterance(" ");
+    utterance.volume = 0;
+    window.speechSynthesis.speak(utterance);
+  }
+
   function speak(text) {
     const cleaned = text?.trim();
     if (!available || !cleaned) {
       return;
     }
     window.speechSynthesis.cancel();
+    window.speechSynthesis.resume();
     const utterance = new SpeechSynthesisUtterance(cleaned);
     if (preferredVoice) {
       utterance.voice = preferredVoice;
@@ -71,6 +82,7 @@ export function useSpeechSynthesis({ onStart, onEnd } = {}) {
     speaking,
     speak,
     stop,
+    warmUp,
     voiceName: preferredVoice?.name || "",
   };
 }

@@ -204,6 +204,15 @@ textarea {
   border-color: #62d6d2;
 }
 
+.voice-notice {
+  margin: 0;
+  padding: 10px 12px;
+  color: #f1c453;
+  background: rgba(241, 196, 83, 0.08);
+  border: 1px solid rgba(241, 196, 83, 0.35);
+  border-radius: 8px;
+}
+
 .message-list {
   display: flex;
   flex-direction: column;
