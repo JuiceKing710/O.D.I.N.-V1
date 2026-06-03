@@ -44,6 +44,17 @@ export function fetchTasks(username = "local-user") {
   return request(`/api/v1/tasks?username=${encodeURIComponent(username)}`);
 }
 
+export function createTask({ name, description = "", username = "local-user" }) {
+  return request("/api/v1/tasks", {
+    method: "POST",
+    body: JSON.stringify({
+      description: description.trim() || null,
+      name,
+      username,
+    }),
+  });
+}
+
 export function loadModel(modelName) {
   return request("/api/v1/models/load", {
     method: "POST",
