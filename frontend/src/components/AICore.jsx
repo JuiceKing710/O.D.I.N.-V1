@@ -6,7 +6,7 @@ export function AICore({ state }) {
       <div className="core-ring outer" />
       <div className="core-ring inner" />
       <div className="core-orb" />
+      <span className="core-state">{state}</span>
     </section>
   );
 }
-
