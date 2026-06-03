@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { useSpeechRecognition } from "../hooks/useSpeechRecognition.js";
 import { useSpeechSynthesis } from "../hooks/useSpeechSynthesis.js";
 import { fetchModels, sendChatMessage } from "../ipc/apiClient.js";
+import { useAppState } from "../state/appContext.jsx";
 import { useChatStore } from "../state/chatStore.js";
 
 const MESSAGE_RENDER_LIMIT = 120;
@@ -22,6 +23,7 @@ export function ChatView({ onOpenCoreFocus }) {
   const inputRef = useRef(null);
   const messageEndRef = useRef(null);
   const messageListRef = useRef(null);
+  const { conversationId, currentUser, setConversationId } = useAppState();
   const messages = useChatStore((state) => state.messages);
   const addMessage = useChatStore((state) => state.addMessage);
   const voiceState = useChatStore((state) => state.voiceState);
@@ -134,12 +136,18 @@ export function ChatView({ onOpenCoreFocus }) {
       return;
     }
     speech.warmUp();
-    addMessage({ role: "user", content: text });
+    addMessage({ role: "user", content: text, conversationId });
     setInput("");
     setVoiceState("thinking");
     try {
-      const response = await sendChatMessage({ message: text });
+      const response = await sendChatMessage({
+        conversationId,
+        message: text,
+        username: currentUser.username,
+      });
+      setConversationId(response.conversation_id);
       const assistantMessage = {
+        conversationId: response.conversation_id || conversationId,
         id: crypto.randomUUID(),
         role: "assistant",
         content: response.reply,

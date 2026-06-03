@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { createTask, fetchTasks } from "../ipc/apiClient.js";
+import { useAppState } from "../state/appContext.jsx";
 import { useChatStore } from "../state/chatStore.js";
 
 export function ProjectDashboard() {
@@ -9,12 +10,13 @@ export function ProjectDashboard() {
   const [error, setError] = useState("");
   const [name, setName] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const { currentUser } = useAppState();
 
   useEffect(() => {
-    fetchTasks()
+    fetchTasks(currentUser.username)
       .then(setTasks)
       .catch((err) => setError(err.message));
-  }, [setTasks]);
+  }, [currentUser.username, setTasks]);
 
   async function handleSubmit(event) {
     event.preventDefault();
@@ -28,6 +30,7 @@ export function ProjectDashboard() {
       const task = await createTask({
         description,
         name: trimmedName,
+        username: currentUser.username,
       });
       setTasks([task, ...tasks.filter((current) => current.task_id !== task.task_id)]);
       setName("");

@@ -876,7 +876,7 @@ textarea {
   }
 
   .sidebar-status {
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
     margin-top: 0;
   }
 

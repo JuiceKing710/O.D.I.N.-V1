@@ -6,6 +6,7 @@ import { CoreFocusView } from "./components/CoreFocusView.jsx";
 import { ProjectDashboard } from "./components/ProjectDashboard.jsx";
 import { SettingsPanel } from "./components/SettingsPanel.jsx";
 import { connectEvents } from "./ipc/apiClient.js";
+import { AppStateProvider, useAppState } from "./state/appContext.jsx";
 import { useChatStore } from "./state/chatStore.js";
 import "./styles.css";
 
@@ -18,6 +19,7 @@ const PANELS = [
 function App() {
   const [activePanel, setActivePanel] = useState("chat");
   const [coreFocus, setCoreFocus] = useState(false);
+  const { conversationId, currentUser } = useAppState();
   const messages = useChatStore((state) => state.messages);
   const tasks = useChatStore((state) => state.tasks);
   const voiceState = useChatStore((state) => state.voiceState);
@@ -61,6 +63,14 @@ function App() {
         </nav>
         <dl className="sidebar-status" aria-label="Session status">
           <div>
+            <dt>User</dt>
+            <dd>{currentUser.displayName}</dd>
+          </div>
+          <div>
+            <dt>Conversation</dt>
+            <dd>{conversationId || "New"}</dd>
+          </div>
+          <div>
             <dt>Voice</dt>
             <dd>{voiceState}</dd>
           </div>
@@ -84,4 +94,8 @@ function App() {
 }
 
 const root = createRoot(document.getElementById("root"));
-root.render(<App />);
+root.render(
+  <AppStateProvider>
+    <App />
+  </AppStateProvider>,
+);

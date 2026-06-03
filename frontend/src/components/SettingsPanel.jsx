@@ -1,18 +1,26 @@
 import React, { useEffect, useState } from "react";
-import { fetchModels, fetchSettings, loadModel } from "../ipc/apiClient.js";
+import { fetchModels, loadModel } from "../ipc/apiClient.js";
+import { useAppState } from "../state/appContext.jsx";
 
 export function SettingsPanel() {
-  const [settings, setSettings] = useState(null);
   const [models, setModels] = useState([]);
   const [provider, setProvider] = useState(null);
   const [selectedModel, setSelectedModel] = useState("");
   const [error, setError] = useState("");
+  const { refreshSettings, settings, settingsError, settingsLoading } = useAppState();
+  const displayError = error || settingsError;
   const permissionEntries = Object.entries(settings?.permissions || {});
 
   useEffect(() => {
-    Promise.all([fetchSettings(), fetchModels()])
-      .then(([settingsResponse, modelsResponse]) => {
-        setSettings(settingsResponse);
+    let cancelled = false;
+    refreshSettings().catch(() => {
+      // The shared settings error is rendered from context.
+    });
+    fetchModels()
+      .then((modelsResponse) => {
+        if (cancelled) {
+          return;
+        }
         setModels(modelsResponse.models);
         setProvider(modelsResponse.provider);
         setSelectedModel(
@@ -21,8 +29,15 @@ export function SettingsPanel() {
             "",
         );
       })
-      .catch((err) => setError(err.message));
-  }, []);
+      .catch((err) => {
+        if (!cancelled) {
+          setError(err.message);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshSettings]);
 
   async function handleModelSubmit(event) {
     event.preventDefault();
@@ -44,7 +59,7 @@ export function SettingsPanel() {
       <header>
         <h1>Settings</h1>
       </header>
-      {error && <p className="error">{error}</p>}
+      {displayError && <p className="error">{displayError}</p>}
       {settings ? (
         <div className="settings-grid">
           <section className="settings-section" aria-label="Model provider">
@@ -131,7 +146,9 @@ ollama pull llama3.2`}</pre>
           </section>
         </div>
       ) : (
-        <div className="empty-state">Loading settings...</div>
+        <div className="empty-state">
+          {settingsLoading ? "Loading settings..." : "Settings unavailable."}
+        </div>
       )}
     </section>
   );
