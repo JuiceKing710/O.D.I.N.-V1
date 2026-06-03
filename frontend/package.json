@@ -1,0 +1,23 @@
+{
+  "name": "jarvis-v1-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "desktop": "npm run build && electron .",
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "^6.0.2",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "vite": "^8.0.14",
+    "zustand": "^4.5.2"
+  },
+  "devDependencies": {
+    "electron": "^39.2.7"
+  }
+}

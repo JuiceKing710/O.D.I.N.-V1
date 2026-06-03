@@ -1,0 +1,228 @@
+:root {
+  color: #f4f7fb;
+  background: #11151c;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+button,
+textarea {
+  font: inherit;
+}
+
+.app-shell {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) 1fr;
+  min-height: 100vh;
+}
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  padding: 24px;
+  background: #171c24;
+  border-right: 1px solid #2a3340;
+}
+
+.workspace {
+  min-width: 0;
+  padding: 24px;
+}
+
+.ai-core {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: min(180px, 100%);
+  aspect-ratio: 1;
+  margin-inline: auto;
+}
+
+.core-ring,
+.core-orb {
+  position: absolute;
+  border-radius: 999px;
+}
+
+.core-ring.outer {
+  width: 94%;
+  height: 94%;
+  border: 1px solid #62d6d2;
+  animation: rotate 9s linear infinite;
+}
+
+.core-ring.inner {
+  width: 68%;
+  height: 68%;
+  border: 2px dashed #f1c453;
+  animation: rotate 6s linear infinite reverse;
+}
+
+.core-orb {
+  width: 42%;
+  height: 42%;
+  background: radial-gradient(circle, #f8fbff 0%, #62d6d2 45%, #2f6f8f 100%);
+  box-shadow: 0 0 32px rgba(98, 214, 210, 0.45);
+}
+
+.ai-core.listening .core-orb {
+  box-shadow: 0 0 44px rgba(91, 141, 239, 0.65);
+}
+
+.ai-core.thinking .core-ring.inner {
+  animation-duration: 2s;
+}
+
+.ai-core.speaking .core-orb {
+  transform: scale(1.08);
+}
+
+.tabs {
+  display: grid;
+  gap: 8px;
+}
+
+.tab {
+  padding: 10px 12px;
+  color: #d8e1ec;
+  text-align: left;
+  text-transform: capitalize;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.tab.active,
+.tab:focus-visible {
+  border-color: #62d6d2;
+  outline: none;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 980px;
+  min-height: calc(100vh - 48px);
+}
+
+.chat-panel {
+  justify-content: space-between;
+}
+
+.message-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow: auto;
+}
+
+.message {
+  max-width: 760px;
+  padding: 12px;
+  border: 1px solid #2a3340;
+  border-radius: 8px;
+  background: #171c24;
+}
+
+.message span {
+  display: block;
+  margin-bottom: 6px;
+  color: #8ea0b6;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+}
+
+.message p {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.message.user {
+  margin-left: auto;
+  background: #18252b;
+}
+
+.composer {
+  display: grid;
+  gap: 8px;
+}
+
+.composer label {
+  color: #8ea0b6;
+}
+
+.composer textarea {
+  width: 100%;
+  resize: vertical;
+  color: #f4f7fb;
+  background: #10141a;
+  border: 1px solid #2a3340;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.composer button {
+  justify-self: end;
+  padding: 10px 16px;
+  color: #11151c;
+  background: #62d6d2;
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.empty-state,
+.error {
+  color: #aab7c8;
+}
+
+.settings-list {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 8px 16px;
+}
+
+.settings-list dt {
+  color: #8ea0b6;
+}
+
+.settings-list dd {
+  margin: 0;
+}
+
+@keyframes rotate {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 760px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    border-right: 0;
+    border-bottom: 1px solid #2a3340;
+  }
+
+  .tabs {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .tab {
+    text-align: center;
+  }
+}
+

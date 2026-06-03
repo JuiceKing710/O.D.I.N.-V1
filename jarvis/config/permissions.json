@@ -1,0 +1,25 @@
+{
+  "permissions": [
+    {
+      "name": "read_files",
+      "description": "Read user-selected local files.",
+      "default": "prompt"
+    },
+    {
+      "name": "write_files",
+      "description": "Create or modify local files.",
+      "default": "prompt"
+    },
+    {
+      "name": "execute_scripts",
+      "description": "Execute local scripts or shell commands.",
+      "default": "denied"
+    },
+    {
+      "name": "access_network",
+      "description": "Access external network resources.",
+      "default": "prompt"
+    }
+  ]
+}
+
