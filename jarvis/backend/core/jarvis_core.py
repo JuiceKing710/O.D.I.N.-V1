@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from jarvis.backend.core.bot_manager import BotManager, BotMessage
+from jarvis.backend.core.event_bus import EventBus
 from jarvis.backend.core.lm_provider import LMProviderInterface
 from jarvis.backend.core.memory_manager import MemoryManager
 from jarvis.backend.utils.audit_logging import AuditLogger
@@ -16,11 +17,13 @@ class JarvisCore:
         bot_manager: BotManager,
         lm_provider: LMProviderInterface,
         audit_logger: AuditLogger,
+        event_bus: EventBus | None = None,
     ) -> None:
         self.memory = memory
         self.bot_manager = bot_manager
         self.lm_provider = lm_provider
         self.audit_logger = audit_logger
+        self.event_bus = event_bus
 
     async def handle_message(
         self,
@@ -39,7 +42,8 @@ class JarvisCore:
             if conversation_id is not None
             else self.memory.create_conversation(user.user_id, title=normalized[:80])
         )
-        self.memory.add_message(convo.convo_id, "user", normalized)
+        user_message = self.memory.add_message(convo.convo_id, "user", normalized)
+        self._publish_chat_message(user_message.role, user_message.content, convo.convo_id)
 
         bot_name, bot_reply = await self._maybe_dispatch_bot(normalized)
         if bot_reply is not None:
@@ -50,7 +54,8 @@ class JarvisCore:
             ]
             reply = await self.lm_provider.generate(normalized, context=context, metadata=metadata or {})
 
-        self.memory.add_message(convo.convo_id, "assistant", reply)
+        assistant_message = self.memory.add_message(convo.convo_id, "assistant", reply)
+        self._publish_chat_message(assistant_message.role, assistant_message.content, convo.convo_id)
         self.audit_logger.log(
             actor=username,
             action="chat",
@@ -63,6 +68,18 @@ class JarvisCore:
             "bot": bot_name,
             "created_at": datetime.now(timezone.utc),
         }
+
+    def _publish_chat_message(self, role: str, content: str, conversation_id: int) -> None:
+        if self.event_bus is None:
+            return
+        self.event_bus.publish(
+            "chat.message",
+            {
+                "conversation_id": conversation_id,
+                "role": role,
+                "content": content,
+            },
+        )
 
     async def _maybe_dispatch_bot(self, message: str) -> tuple[str | None, str | None]:
         if not message.startswith("/"):
@@ -81,4 +98,3 @@ class JarvisCore:
             return bot_name, response.error or "Bot request failed."
         text = response.payload.get("text")
         return bot_name, str(text) if text is not None else "Bot request completed."
-

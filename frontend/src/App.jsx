@@ -1,15 +1,19 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { AICore } from "./components/AICore.jsx";
 import { ChatView } from "./components/ChatView.jsx";
 import { ProjectDashboard } from "./components/ProjectDashboard.jsx";
 import { SettingsPanel } from "./components/SettingsPanel.jsx";
+import { connectEvents } from "./ipc/apiClient.js";
 import { useChatStore } from "./state/chatStore.js";
 import "./styles.css";
 
 function App() {
   const [activePanel, setActivePanel] = useState("chat");
   const voiceState = useChatStore((state) => state.voiceState);
+  const applyEvent = useChatStore((state) => state.applyEvent);
+
+  useEffect(() => connectEvents(applyEvent), [applyEvent]);
 
   return (
     <main className="app-shell">
@@ -39,4 +43,3 @@ function App() {
 
 const root = createRoot(document.getElementById("root"));
 root.render(<App />);
-

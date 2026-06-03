@@ -19,6 +19,9 @@ dev = [
   "httpx2>=0.28",
   "ruff>=0.4",
 ]
+vector = [
+  "chromadb>=0.5",
+]
 
 [tool.setuptools.packages.find]
 include = ["jarvis*"]

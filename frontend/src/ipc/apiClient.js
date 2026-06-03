@@ -29,3 +29,28 @@ export function fetchSettings() {
   return request("/api/v1/settings");
 }
 
+export function fetchModels() {
+  return request("/api/v1/models");
+}
+
+export function fetchTasks(username = "local-user") {
+  return request(`/api/v1/tasks?username=${encodeURIComponent(username)}`);
+}
+
+export function loadModel(modelName) {
+  return request("/api/v1/models/load", {
+    method: "POST",
+    body: JSON.stringify({ model_name: modelName }),
+  });
+}
+
+export function connectEvents(onEvent) {
+  const url = new URL(API_BASE_URL);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  url.pathname = "/api/v1/events";
+  const socket = new WebSocket(url);
+  socket.addEventListener("message", (event) => {
+    onEvent(JSON.parse(event.data));
+  });
+  return () => socket.close();
+}

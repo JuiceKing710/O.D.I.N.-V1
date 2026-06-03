@@ -90,3 +90,26 @@ class ModelInfo(BaseModel):
 class ModelsResponse(BaseModel):
     models: list[ModelInfo]
 
+
+class ModelLoadRequest(BaseModel):
+    model_name: str = Field(min_length=1)
+
+
+class EventResponse(BaseModel):
+    id: str
+    type: str
+    payload: dict[str, Any]
+    created_at: str
+
+
+class IntegrityResponse(BaseModel):
+    ok: bool
+    sqlite_ok: bool
+    vector_ok: bool
+    details: dict[str, Any] = Field(default_factory=dict)
+
+
+class BackupResponse(BaseModel):
+    path: str
+    created_at: datetime
+    encrypted: bool

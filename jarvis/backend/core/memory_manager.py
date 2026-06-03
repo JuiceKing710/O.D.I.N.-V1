@@ -8,6 +8,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterator, Literal
 
+from jarvis.backend.core.vector_store import NullVectorStore, VectorStoreInterface
+
 
 @dataclass(slots=True)
 class UserRecord:
@@ -64,6 +66,26 @@ class TaskRecord:
         }
 
 
+@dataclass(slots=True)
+class ReflectionRecord:
+    reflection_id: int
+    convo_id: int
+    summary: str
+    topics: str | None
+    sentiment: str | None
+    created_at: datetime
+
+    def to_api(self) -> dict[str, Any]:
+        return {
+            "reflection_id": self.reflection_id,
+            "convo_id": self.convo_id,
+            "summary": self.summary,
+            "topics": self.topics,
+            "sentiment": self.sentiment,
+            "created_at": self.created_at,
+        }
+
+
 class TTLCache:
     def __init__(self, ttl_seconds: int = 300, max_size: int = 256) -> None:
         self.ttl_seconds = ttl_seconds
@@ -91,10 +113,16 @@ class TTLCache:
 
 
 class MemoryManager:
-    def __init__(self, db_path: Path | str, cache: TTLCache | None = None) -> None:
+    def __init__(
+        self,
+        db_path: Path | str,
+        cache: TTLCache | None = None,
+        vector_store: VectorStoreInterface | None = None,
+    ) -> None:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.cache = cache or TTLCache()
+        self.vector_store = vector_store or NullVectorStore()
         self._initialize()
 
     def get_or_create_user(self, username: str, display_name: str | None = None) -> UserRecord:
@@ -146,6 +174,7 @@ class MemoryManager:
     ) -> MessageRecord:
         if not content.strip():
             raise ValueError("content is required")
+        embedding_id = None
         with self._connect() as conn:
             cursor = conn.execute(
                 """
@@ -162,6 +191,21 @@ class MemoryManager:
                 """,
                 (cursor.lastrowid,),
             ).fetchone()
+            message = self._message_from_row(row)
+            embedding_id = self._safe_upsert_message(message)
+            if embedding_id is not None:
+                conn.execute(
+                    "UPDATE messages SET embedding_id = ? WHERE msg_id = ?",
+                    (embedding_id, message.msg_id),
+                )
+                row = conn.execute(
+                    """
+                    SELECT msg_id, convo_id, role, content, embedding_id, created_at
+                    FROM messages
+                    WHERE msg_id = ?
+                    """,
+                    (message.msg_id,),
+                ).fetchone()
         self.cache.clear()
         return self._message_from_row(row)
 
@@ -170,6 +214,10 @@ class MemoryManager:
         cached = self.cache.get(cache_key)
         if cached is not None:
             return cached
+        vector_records = self._query_vector_messages(user_id, query, limit)
+        if len(vector_records) >= limit:
+            self.cache.set(cache_key, vector_records)
+            return vector_records
         needle = f"%{query.strip()}%"
         with self._connect() as conn:
             rows = conn.execute(
@@ -184,8 +232,9 @@ class MemoryManager:
                 (user_id, needle, limit),
             ).fetchall()
         records = [self._message_from_row(row) for row in rows]
-        self.cache.set(cache_key, records)
-        return records
+        merged = self._merge_messages(vector_records, records, limit)
+        self.cache.set(cache_key, merged)
+        return merged
 
     def create_task(self, user_id: int, name: str, description: str | None = None) -> TaskRecord:
         if not name.strip():
@@ -206,6 +255,8 @@ class MemoryManager:
                 """,
                 (cursor.lastrowid,),
             ).fetchone()
+            task = self._task_from_row(row)
+            self._safe_upsert_task(task)
         return self._task_from_row(row)
 
     def list_tasks(self, user_id: int) -> list[TaskRecord]:
@@ -220,6 +271,59 @@ class MemoryManager:
                 (user_id,),
             ).fetchall()
         return [self._task_from_row(row) for row in rows]
+
+    def list_conversation_messages(self, convo_id: int) -> list[MessageRecord]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT msg_id, convo_id, role, content, embedding_id, created_at
+                FROM messages
+                WHERE convo_id = ?
+                ORDER BY created_at ASC, msg_id ASC
+                """,
+                (convo_id,),
+            ).fetchall()
+        return [self._message_from_row(row) for row in rows]
+
+    def save_reflection_summary(
+        self,
+        convo_id: int,
+        summary: str,
+        topics: str | None = None,
+        sentiment: str | None = None,
+    ) -> ReflectionRecord:
+        if not summary.strip():
+            raise ValueError("summary is required")
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO reflection_summaries(convo_id, summary, topics, sentiment)
+                VALUES (?, ?, ?, ?)
+                """,
+                (convo_id, summary.strip(), topics, sentiment),
+            )
+            row = conn.execute(
+                """
+                SELECT reflection_id, convo_id, summary, topics, sentiment, created_at
+                FROM reflection_summaries
+                WHERE reflection_id = ?
+                """,
+                (cursor.lastrowid,),
+            ).fetchone()
+        return self._reflection_from_row(row)
+
+    def list_reflection_summaries(self, convo_id: int) -> list[ReflectionRecord]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT reflection_id, convo_id, summary, topics, sentiment, created_at
+                FROM reflection_summaries
+                WHERE convo_id = ?
+                ORDER BY created_at DESC, reflection_id DESC
+                """,
+                (convo_id,),
+            ).fetchall()
+        return [self._reflection_from_row(row) for row in rows]
 
     def _initialize(self) -> None:
         with self._connect() as conn:
@@ -269,14 +373,110 @@ class MemoryManager:
                   FOREIGN KEY(user_id) REFERENCES users(user_id)
                 );
 
+                CREATE TABLE IF NOT EXISTS reflection_summaries (
+                  reflection_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  convo_id INTEGER NOT NULL,
+                  summary TEXT NOT NULL,
+                  topics TEXT,
+                  sentiment TEXT,
+                  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                  FOREIGN KEY(convo_id) REFERENCES conversations(convo_id)
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_conversations_user_id
                   ON conversations(user_id);
                 CREATE INDEX IF NOT EXISTS idx_messages_convo_id_created_at
                   ON messages(convo_id, created_at);
                 CREATE INDEX IF NOT EXISTS idx_tasks_user_id_status
                   ON tasks(user_id, status);
+                CREATE INDEX IF NOT EXISTS idx_reflection_summaries_convo_id
+                  ON reflection_summaries(convo_id);
                 """
             )
+
+    def _query_vector_messages(
+        self, user_id: int, query: str, limit: int
+    ) -> list[MessageRecord]:
+        if not self.vector_store.enabled or not query.strip():
+            return []
+        try:
+            vector_rows = self.vector_store.query("messages", query, limit)
+        except Exception:
+            return []
+        message_ids = []
+        for row in vector_rows:
+            raw_id = row.metadata.get("msg_id")
+            if raw_id is None and row.record_id.startswith("message:"):
+                raw_id = row.record_id.split(":", maxsplit=1)[1]
+            try:
+                message_ids.append(int(raw_id))
+            except (TypeError, ValueError):
+                continue
+        if not message_ids:
+            return []
+        with self._connect() as conn:
+            placeholders = ",".join("?" for _ in message_ids)
+            rows = conn.execute(
+                f"""
+                SELECT m.msg_id, m.convo_id, m.role, m.content, m.embedding_id, m.created_at
+                FROM messages m
+                JOIN conversations c ON c.convo_id = m.convo_id
+                WHERE c.user_id = ? AND m.msg_id IN ({placeholders})
+                """,
+                (user_id, *message_ids),
+            ).fetchall()
+        records_by_id = {row["msg_id"]: self._message_from_row(row) for row in rows}
+        return [records_by_id[msg_id] for msg_id in message_ids if msg_id in records_by_id]
+
+    @staticmethod
+    def _merge_messages(
+        primary: list[MessageRecord], secondary: list[MessageRecord], limit: int
+    ) -> list[MessageRecord]:
+        merged = []
+        seen = set()
+        for message in [*primary, *secondary]:
+            if message.msg_id in seen:
+                continue
+            merged.append(message)
+            seen.add(message.msg_id)
+            if len(merged) >= limit:
+                break
+        return merged
+
+    def _safe_upsert_message(self, message: MessageRecord) -> str | None:
+        if not self.vector_store.enabled:
+            return None
+        try:
+            return self.vector_store.upsert_message(
+                message.msg_id,
+                message.content,
+                {
+                    "msg_id": message.msg_id,
+                    "convo_id": message.convo_id,
+                    "role": message.role,
+                    "timestamp": message.created_at.isoformat(),
+                },
+            )
+        except Exception:
+            return None
+
+    def _safe_upsert_task(self, task: TaskRecord) -> str | None:
+        if not self.vector_store.enabled:
+            return None
+        content = f"{task.name}\n{task.description or ''}".strip()
+        try:
+            return self.vector_store.upsert_task(
+                task.task_id,
+                content,
+                {
+                    "task_id": task.task_id,
+                    "user_id": task.user_id,
+                    "status": task.status,
+                    "timestamp": task.created_at.isoformat(),
+                },
+            )
+        except Exception:
+            return None
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
@@ -330,5 +530,16 @@ class MemoryManager:
             name=row["name"],
             description=row["description"],
             status=row["status"],
+            created_at=cls._parse_datetime(row["created_at"]),
+        )
+
+    @classmethod
+    def _reflection_from_row(cls, row: sqlite3.Row) -> ReflectionRecord:
+        return ReflectionRecord(
+            reflection_id=row["reflection_id"],
+            convo_id=row["convo_id"],
+            summary=row["summary"],
+            topics=row["topics"],
+            sentiment=row["sentiment"],
             created_at=cls._parse_datetime(row["created_at"]),
         )

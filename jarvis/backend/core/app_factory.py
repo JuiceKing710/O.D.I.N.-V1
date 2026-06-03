@@ -9,10 +9,14 @@ from jarvis.backend.bots.file_bot import FileBot
 from jarvis.backend.bots.research_bot import ResearchBot
 from jarvis.backend.bots.system_bot import SystemBot
 from jarvis.backend.core.bot_manager import BotManager
+from jarvis.backend.core.event_bus import EventBus
 from jarvis.backend.core.jarvis_core import JarvisCore
 from jarvis.backend.core.lm_provider import EchoLMProvider, LMStudioProvider
 from jarvis.backend.core.memory_manager import MemoryManager
+from jarvis.backend.core.recovery_manager import RecoveryManager
 from jarvis.backend.core.settings_store import SettingsStore
+from jarvis.backend.core.vector_store import ChromaVectorStore, NullVectorStore, VectorStoreInterface
+from jarvis.backend.core.voice_manager import VoiceManager
 from jarvis.backend.utils.audit_logging import AuditLogger
 from jarvis.backend.utils.permissions import PermissionManager
 
@@ -35,11 +39,46 @@ def get_settings_store() -> SettingsStore:
 
 
 @lru_cache(maxsize=1)
+def get_event_bus() -> EventBus:
+    return EventBus()
+
+
+@lru_cache(maxsize=1)
+def get_vector_store() -> VectorStoreInterface:
+    chroma_path = os.environ.get("JARVIS_CHROMA_PATH")
+    if not chroma_path:
+        return NullVectorStore()
+    try:
+        return ChromaVectorStore(chroma_path)
+    except RuntimeError:
+        return NullVectorStore()
+
+
+@lru_cache(maxsize=1)
+def get_recovery_manager() -> RecoveryManager:
+    return RecoveryManager(
+        db_path=_default_db_path(),
+        backup_dir=Path(os.environ.get("JARVIS_BACKUP_DIR", "data/backups")),
+        vector_store=get_vector_store(),
+    )
+
+
+@lru_cache(maxsize=1)
+def get_voice_manager() -> VoiceManager:
+    return VoiceManager(event_bus=get_event_bus())
+
+
+@lru_cache(maxsize=1)
 def get_core() -> JarvisCore:
     permission_manager = get_permission_manager()
     audit_logger = AuditLogger(Path(os.environ.get("JARVIS_AUDIT_LOG", "data/audit.log")))
-    memory = MemoryManager(_default_db_path())
-    bot_manager = BotManager(permission_manager=permission_manager, audit_logger=audit_logger)
+    event_bus = get_event_bus()
+    memory = MemoryManager(_default_db_path(), vector_store=get_vector_store())
+    bot_manager = BotManager(
+        permission_manager=permission_manager,
+        audit_logger=audit_logger,
+        event_bus=event_bus,
+    )
     bot_manager.register(FileBot(permission_manager, audit_logger))
     bot_manager.register(ResearchBot(permission_manager, audit_logger))
     bot_manager.register(CodeBot(permission_manager, audit_logger))
@@ -52,4 +91,5 @@ def get_core() -> JarvisCore:
         bot_manager=bot_manager,
         lm_provider=lm_provider,
         audit_logger=audit_logger,
+        event_bus=event_bus,
     )

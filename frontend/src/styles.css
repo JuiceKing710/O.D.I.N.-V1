@@ -14,6 +14,7 @@ body {
 }
 
 button,
+select,
 textarea {
   font: inherit;
 }
@@ -201,6 +202,53 @@ textarea {
   margin: 0;
 }
 
+.inline-form {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.inline-form select {
+  min-width: 12rem;
+  color: #f4f7fb;
+  background: #10141a;
+  border: 1px solid #2a3340;
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.inline-form button {
+  padding: 8px 12px;
+  color: #11151c;
+  background: #62d6d2;
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.task-list {
+  display: grid;
+  gap: 12px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.task-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px;
+  background: #171c24;
+  border: 1px solid #2a3340;
+  border-radius: 8px;
+}
+
+.task-list small {
+  color: #62d6d2;
+}
+
 @keyframes rotate {
   to {
     transform: rotate(360deg);
@@ -225,4 +273,3 @@ textarea {
     text-align: center;
   }
 }
-

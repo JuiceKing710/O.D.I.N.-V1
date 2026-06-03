@@ -26,8 +26,15 @@ class LMProviderInterface(ABC):
     async def list_models(self) -> list[ModelInfo]:
         raise NotImplementedError
 
+    @abstractmethod
+    async def load_model(self, model_name: str) -> ModelInfo:
+        raise NotImplementedError
+
 
 class EchoLMProvider(LMProviderInterface):
+    def __init__(self, model_name: str = "echo-local") -> None:
+        self.model_name = model_name
+
     async def generate(
         self, text: str, context: list[str], metadata: dict[str, Any] | None = None
     ) -> str:
@@ -36,7 +43,14 @@ class EchoLMProvider(LMProviderInterface):
         return f"I heard: {text}"
 
     async def list_models(self) -> list[ModelInfo]:
-        return [ModelInfo(id="echo-local", provider="builtin", loaded=True)]
+        return [ModelInfo(id=self.model_name, provider="builtin", loaded=True)]
+
+    async def load_model(self, model_name: str) -> ModelInfo:
+        cleaned = model_name.strip()
+        if not cleaned:
+            raise ValueError("model_name is required")
+        self.model_name = cleaned
+        return ModelInfo(id=self.model_name, provider="builtin", loaded=True)
 
 
 class LMStudioProvider(LMProviderInterface):
@@ -77,9 +91,20 @@ class LMStudioProvider(LMProviderInterface):
         except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
             return []
         return [
-            ModelInfo(id=item.get("id", "unknown"), provider="lm-studio", loaded=True)
+            ModelInfo(
+                id=item.get("id", "unknown"),
+                provider="lm-studio",
+                loaded=item.get("id") == self.model,
+            )
             for item in body.get("data", [])
         ]
+
+    async def load_model(self, model_name: str) -> ModelInfo:
+        cleaned = model_name.strip()
+        if not cleaned:
+            raise ValueError("model_name is required")
+        self.model = cleaned
+        return ModelInfo(id=self.model, provider="lm-studio", loaded=True)
 
     @staticmethod
     def _build_prompt(text: str, context: list[str]) -> str:
