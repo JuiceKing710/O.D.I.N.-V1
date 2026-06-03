@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { useSpeechRecognition } from "../hooks/useSpeechRecognition.js";
 import { useSpeechSynthesis } from "../hooks/useSpeechSynthesis.js";
 import { sendChatMessage } from "../ipc/apiClient.js";
 import { useChatStore } from "../state/chatStore.js";
@@ -17,6 +18,14 @@ export function ChatView() {
     onEnd: () => {
       setSpeakingMessageId("");
       setVoiceState("idle");
+    },
+  });
+  const recognition = useSpeechRecognition({
+    onStart: () => setVoiceState("listening"),
+    onEnd: () => setVoiceState("idle"),
+    onResult: (text) => {
+      setInput(text);
+      void sendMessage(text);
     },
   });
 
@@ -39,9 +48,8 @@ export function ChatView() {
     setVoiceState("idle");
   }
 
-  async function handleSubmit(event) {
-    event.preventDefault();
-    const text = input.trim();
+  async function sendMessage(rawText) {
+    const text = rawText.trim();
     if (!text) {
       return;
     }
@@ -66,6 +74,11 @@ export function ChatView() {
       addMessage({ role: "assistant", content: error.message });
       setVoiceState("idle");
     }
+  }
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+    await sendMessage(input);
   }
 
   return (
@@ -97,6 +110,17 @@ export function ChatView() {
             Stop
           </button>
           <button
+            className={recognition.listening ? "toggle active" : "toggle"}
+            type="button"
+            onClick={() => {
+              speech.warmUp();
+              recognition.toggle();
+            }}
+            disabled={!recognition.available}
+          >
+            {recognition.listening ? "Listening" : "Mic"}
+          </button>
+          <button
             type="button"
             onClick={() => {
               setVoiceEnabled(true);
@@ -114,6 +138,13 @@ export function ChatView() {
         </div>
       </header>
       {voiceNotice && <p className="voice-notice">{voiceNotice}</p>}
+      {recognition.error && <p className="voice-notice">{recognition.error}</p>}
+      {recognition.transcript && (
+        <div className="dictation-preview">
+          <span>Heard</span>
+          <p>{recognition.transcript}</p>
+        </div>
+      )}
       <div className="message-list" aria-live="polite">
         {messages.map((message) => (
           <article key={message.id} className={`message ${message.role}`}>

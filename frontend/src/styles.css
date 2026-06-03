@@ -213,6 +213,27 @@ textarea {
   border-radius: 8px;
 }
 
+.dictation-preview {
+  display: grid;
+  gap: 4px;
+  max-width: 760px;
+  padding: 10px 12px;
+  color: #d8e1ec;
+  background: rgba(98, 214, 210, 0.08);
+  border: 1px solid rgba(98, 214, 210, 0.28);
+  border-radius: 8px;
+}
+
+.dictation-preview span {
+  color: #62d6d2;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+}
+
+.dictation-preview p {
+  margin: 0;
+}
+
 .message-list {
   display: flex;
   flex-direction: column;
