@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { AICore } from "./components/AICore.jsx";
 import { ChatView } from "./components/ChatView.jsx";
+import { CoreFocusView } from "./components/CoreFocusView.jsx";
 import { ProjectDashboard } from "./components/ProjectDashboard.jsx";
 import { SettingsPanel } from "./components/SettingsPanel.jsx";
 import { connectEvents } from "./ipc/apiClient.js";
@@ -16,6 +17,7 @@ const PANELS = [
 
 function App() {
   const [activePanel, setActivePanel] = useState("chat");
+  const [coreFocus, setCoreFocus] = useState(false);
   const messages = useChatStore((state) => state.messages);
   const tasks = useChatStore((state) => state.tasks);
   const voiceState = useChatStore((state) => state.voiceState);
@@ -27,6 +29,16 @@ function App() {
 
   useEffect(() => connectEvents(applyEvent), [applyEvent]);
 
+  if (coreFocus) {
+    return (
+      <CoreFocusView
+        messages={messages}
+        onExit={() => setCoreFocus(false)}
+        state={voiceState}
+      />
+    );
+  }
+
   return (
     <main className="app-shell">
       <aside className="sidebar" aria-label="Jarvis navigation">
@@ -36,7 +48,10 @@ function App() {
             <button
               key={panel.id}
               className={activePanel === panel.id ? "tab active" : "tab"}
-              onClick={() => setActivePanel(panel.id)}
+              onClick={() => {
+                setActivePanel(panel.id);
+                setCoreFocus(false);
+              }}
               type="button"
             >
               <span>{panel.label}</span>
@@ -60,7 +75,7 @@ function App() {
         </dl>
       </aside>
       <section className="workspace">
-        {activePanel === "chat" && <ChatView />}
+        {activePanel === "chat" && <ChatView onOpenCoreFocus={() => setCoreFocus(true)} />}
         {activePanel === "projects" && <ProjectDashboard />}
         {activePanel === "settings" && <SettingsPanel />}
       </section>

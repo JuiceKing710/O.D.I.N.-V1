@@ -40,6 +40,77 @@ textarea {
   padding: 24px;
 }
 
+.core-focus-view {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  overflow: hidden;
+  color: #fff6df;
+  background:
+    radial-gradient(circle at center, rgba(255, 147, 31, 0.16), transparent 42%),
+    #050505;
+}
+
+.core-focus-header {
+  position: absolute;
+  z-index: 4;
+  top: 24px;
+  right: 28px;
+  left: 28px;
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  color: rgba(255, 230, 180, 0.78);
+}
+
+.core-focus-header button {
+  padding: 8px 12px;
+  color: #fff6df;
+  background: rgba(255, 122, 24, 0.16);
+  border: 1px solid rgba(255, 173, 66, 0.52);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.core-focus-chat {
+  position: absolute;
+  inset: 78px 42px 42px;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  justify-content: center;
+  pointer-events: none;
+  opacity: 0.18;
+}
+
+.ghost-message {
+  max-width: min(680px, 48vw);
+  padding: 12px 14px;
+  color: #ffe3b0;
+  background: rgba(255, 122, 24, 0.07);
+  border: 1px solid rgba(255, 173, 66, 0.22);
+  border-radius: 8px;
+  filter: blur(0.2px);
+}
+
+.ghost-message.user {
+  align-self: flex-end;
+}
+
+.ghost-message span {
+  color: rgba(255, 207, 107, 0.86);
+  font-size: 0.76rem;
+  text-transform: uppercase;
+}
+
+.ghost-message p {
+  margin: 4px 0 0;
+  line-height: 1.45;
+}
+
 .ai-core {
   position: relative;
   display: grid;
@@ -51,6 +122,8 @@ textarea {
 
 .core-ring,
 .core-orb,
+.core-spokes,
+.core-spokes span,
 .core-particles,
 .core-particles span {
   position: absolute;
@@ -60,25 +133,55 @@ textarea {
 .core-ring.outer {
   width: 94%;
   height: 94%;
-  border: 1px solid #62d6d2;
+  border: 1px solid rgba(255, 154, 31, 0.82);
+  box-shadow: 0 0 28px rgba(255, 122, 24, 0.22);
   animation: rotate 9s linear infinite;
 }
 
 .core-ring.inner {
   width: 68%;
   height: 68%;
-  border: 2px dashed #f1c453;
+  border: 2px dashed rgba(255, 207, 107, 0.9);
   animation: rotate 6s linear infinite reverse;
 }
 
 .core-orb {
   width: 42%;
   height: 42%;
-  background: radial-gradient(circle, #f8fbff 0%, #62d6d2 45%, #2f6f8f 100%);
-  box-shadow: 0 0 32px rgba(98, 214, 210, 0.45);
+  background: radial-gradient(circle, #fff8c7 0%, #ffb02e 42%, #ff5a1f 100%);
+  box-shadow:
+    0 0 34px rgba(255, 147, 31, 0.74),
+    0 0 82px rgba(255, 90, 31, 0.34);
   transition:
     box-shadow 180ms ease,
     transform 180ms ease;
+}
+
+.core-spokes {
+  width: 100%;
+  height: 100%;
+  animation: rotate 18s linear infinite reverse;
+}
+
+.core-spokes span {
+  left: 50%;
+  top: 50%;
+  width: 32%;
+  height: 2px;
+  background: linear-gradient(90deg, rgba(255, 249, 198, 0), #ff9a1f 46%, rgba(255, 122, 24, 0));
+  box-shadow: 0 0 14px rgba(255, 122, 24, 0.7);
+  opacity: 0.54;
+  transform: rotate(var(--spoke-angle)) translateX(18px);
+  transform-origin: 0 50%;
+}
+
+.core-spokes span:nth-child(3n) {
+  width: 44%;
+  opacity: 0.8;
+}
+
+.core-spokes span:nth-child(4n) {
+  width: 24%;
 }
 
 .core-particles {
@@ -88,14 +191,13 @@ textarea {
 }
 
 .core-particles span {
-  --particle-angle: calc(var(--particle-index) * 45deg);
   left: 50%;
   top: 50%;
   width: 5px;
   height: 5px;
-  background: #d8e1ec;
-  box-shadow: 0 0 12px rgba(216, 225, 236, 0.68);
-  opacity: 0.5;
+  background: #ffd05f;
+  box-shadow: 0 0 12px rgba(255, 173, 66, 0.86);
+  opacity: 0.66;
   transform: rotate(var(--particle-angle)) translateX(48px);
   transform-origin: 0 0;
   transition:
@@ -106,13 +208,15 @@ textarea {
 }
 
 .ai-core.listening .core-orb {
-  box-shadow: 0 0 44px rgba(91, 141, 239, 0.65);
+  box-shadow:
+    0 0 44px rgba(255, 207, 107, 0.76),
+    0 0 96px rgba(255, 122, 24, 0.38);
 }
 
 .ai-core.listening .core-particles span {
-  background: #5b8def;
-  box-shadow: 0 0 16px rgba(91, 141, 239, 0.8);
-  opacity: 0.72;
+  background: #fff2a8;
+  box-shadow: 0 0 16px rgba(255, 207, 107, 0.9);
+  opacity: 0.82;
   transform: rotate(var(--particle-angle)) translateX(56px);
 }
 
@@ -125,9 +229,9 @@ textarea {
 }
 
 .ai-core.thinking .core-particles span {
-  background: #f1c453;
-  box-shadow: 0 0 16px rgba(241, 196, 83, 0.78);
-  opacity: 0.78;
+  background: #ff9a1f;
+  box-shadow: 0 0 16px rgba(255, 122, 24, 0.84);
+  opacity: 0.86;
 }
 
 .ai-core.speaking .core-orb {
@@ -136,10 +240,41 @@ textarea {
 }
 
 .ai-core.speaking .core-particles span {
-  background: #62d6d2;
-  box-shadow: 0 0 18px rgba(98, 214, 210, 0.82);
+  background: #fff0a2;
+  box-shadow: 0 0 18px rgba(255, 207, 107, 0.9);
   opacity: 0.9;
   transform: rotate(var(--particle-angle)) translateX(62px);
+}
+
+.ai-core.focus {
+  z-index: 3;
+  width: min(72vmin, 720px);
+}
+
+.ai-core.focus .core-state {
+  bottom: -2.4rem;
+  color: rgba(255, 230, 180, 0.78);
+  font-size: 0.9rem;
+}
+
+.ai-core.focus .core-ring.outer {
+  border-width: 2px;
+}
+
+.ai-core.focus .core-orb {
+  width: 18%;
+  height: 18%;
+}
+
+.ai-core.focus .core-particles span {
+  width: 4px;
+  height: 4px;
+  transform: rotate(var(--particle-angle)) translateX(31vmin);
+}
+
+.ai-core.focus .core-spokes span {
+  height: 3px;
+  transform: rotate(var(--spoke-angle)) translateX(8vmin);
 }
 
 .core-state {
@@ -676,6 +811,7 @@ textarea {
 @media (prefers-reduced-motion: reduce) {
   .core-ring,
   .core-orb,
+  .core-spokes,
   .core-particles {
     animation: none;
   }
@@ -721,5 +857,17 @@ textarea {
 
   .voice-controls {
     justify-content: flex-start;
+  }
+
+  .core-focus-chat {
+    inset: 80px 16px 36px;
+  }
+
+  .ghost-message {
+    max-width: 82vw;
+  }
+
+  .ai-core.focus {
+    width: min(84vmin, 520px);
   }
 }

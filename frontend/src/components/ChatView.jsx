@@ -4,7 +4,7 @@ import { useSpeechSynthesis } from "../hooks/useSpeechSynthesis.js";
 import { fetchModels, sendChatMessage } from "../ipc/apiClient.js";
 import { useChatStore } from "../state/chatStore.js";
 
-export function ChatView() {
+export function ChatView({ onOpenCoreFocus }) {
   const [input, setInput] = useState("");
   const [voiceEnabled, setVoiceEnabled] = useState(true);
   const [speakingMessageId, setSpeakingMessageId] = useState("");
@@ -176,6 +176,9 @@ export function ChatView() {
             disabled={!speech.available}
           >
             Test Voice
+          </button>
+          <button type="button" onClick={onOpenCoreFocus}>
+            Core
           </button>
           <span className={`voice-pill ${voiceState}`}>{voiceState}</span>
         </div>
