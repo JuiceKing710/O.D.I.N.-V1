@@ -4,6 +4,7 @@ export const useChatStore = create((set) => ({
   messages: [],
   tasks: [],
   voiceState: "idle",
+  clearMessages: () => set({ messages: [] }),
   addMessage: (message) =>
     set((state) => ({
       messages: state.messages.some(

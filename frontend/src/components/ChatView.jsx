@@ -23,9 +23,10 @@ export function ChatView({ onOpenCoreFocus }) {
   const inputRef = useRef(null);
   const messageEndRef = useRef(null);
   const messageListRef = useRef(null);
-  const { conversationId, currentUser, setConversationId } = useAppState();
+  const { conversationId, currentUser, setConversationId, startNewConversation } = useAppState();
   const messages = useChatStore((state) => state.messages);
   const addMessage = useChatStore((state) => state.addMessage);
+  const clearMessages = useChatStore((state) => state.clearMessages);
   const voiceState = useChatStore((state) => state.voiceState);
   const setVoiceState = useChatStore((state) => state.setVoiceState);
   const speech = useSpeechSynthesis({
@@ -130,6 +131,16 @@ export function ChatView({ onOpenCoreFocus }) {
     setVoiceState("idle");
   }
 
+  function handleNewChat() {
+    stopSpeech();
+    startNewConversation();
+    clearMessages();
+    setInput("");
+    setIsPinnedToLatest(true);
+    setShowJumpLatest(false);
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }
+
   async function sendMessage(rawText) {
     const text = rawText.trim();
     if (!text) {
@@ -176,6 +187,9 @@ export function ChatView({ onOpenCoreFocus }) {
       <header className="chat-header">
         <div>
           <h1>Jarvis</h1>
+          <p className="conversation-label">
+            Conversation {conversationId ? `#${conversationId}` : "New"}
+          </p>
           <p>
             Voice {speech.available ? "ready" : "unavailable"}{" "}
             {speech.voiceName ? `with ${speech.voiceName}` : ""}
@@ -187,6 +201,13 @@ export function ChatView({ onOpenCoreFocus }) {
           </div>
         </div>
         <div className="voice-controls" aria-label="Voice controls">
+          <button
+            type="button"
+            onClick={handleNewChat}
+            disabled={!conversationId && !messages.length}
+          >
+            New Chat
+          </button>
           <button
             className={voiceEnabled ? "toggle active" : "toggle"}
             type="button"

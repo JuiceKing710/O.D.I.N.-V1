@@ -14,6 +14,9 @@ export function AppStateProvider({ children }) {
   const [settings, setSettings] = useState(null);
   const [settingsError, setSettingsError] = useState("");
   const [settingsLoading, setSettingsLoading] = useState(true);
+  const startNewConversation = useCallback(() => {
+    setConversationId(null);
+  }, []);
 
   const refreshSettings = useCallback(async () => {
     setSettingsLoading(true);
@@ -46,6 +49,7 @@ export function AppStateProvider({ children }) {
       settings,
       settingsError,
       settingsLoading,
+      startNewConversation,
     }),
     [
       conversationId,
@@ -54,6 +58,7 @@ export function AppStateProvider({ children }) {
       settings,
       settingsError,
       settingsLoading,
+      startNewConversation,
     ],
   );
 

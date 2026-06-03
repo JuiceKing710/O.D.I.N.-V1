@@ -379,6 +379,11 @@ textarea {
   font-size: clamp(1.6rem, 4vw, 2.3rem);
 }
 
+.chat-header .conversation-label {
+  color: #f1c453;
+  font-size: 0.88rem;
+}
+
 .chat-header p {
   color: #8ea0b6;
 }
