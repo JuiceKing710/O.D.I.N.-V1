@@ -172,6 +172,47 @@ class ApiTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 404)
 
+    def test_conversation_endpoints_list_history_and_messages(self) -> None:
+        first = self.client.post(
+            "/api/v1/chat",
+            json={"message": "first conversation", "username": "history-user"},
+        )
+        second = self.client.post(
+            "/api/v1/chat",
+            json={"message": "second conversation", "username": "history-user"},
+        )
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+
+        listed = self.client.get("/api/v1/conversations", params={"username": "history-user"})
+
+        self.assertEqual(listed.status_code, 200)
+        conversations = listed.json()
+        self.assertEqual(len(conversations), 2)
+        self.assertEqual(conversations[0]["convo_id"], second.json()["conversation_id"])
+        self.assertEqual(conversations[0]["message_count"], 2)
+
+        messages = self.client.get(
+            f"/api/v1/conversations/{first.json()['conversation_id']}/messages",
+            params={"username": "history-user"},
+        )
+
+        self.assertEqual(messages.status_code, 200)
+        self.assertEqual([message["role"] for message in messages.json()], ["user", "assistant"])
+
+    def test_conversation_messages_reject_wrong_user(self) -> None:
+        created = self.client.post(
+            "/api/v1/chat",
+            json={"message": "private conversation", "username": "owner-user"},
+        )
+
+        response = self.client.get(
+            f"/api/v1/conversations/{created.json()['conversation_id']}/messages",
+            params={"username": "other-user"},
+        )
+
+        self.assertEqual(response.status_code, 404)
+
     def test_model_load_endpoint_updates_loaded_model(self) -> None:
         response = self.client.post("/api/v1/models/load", json={"model_name": "echo-alt"})
 

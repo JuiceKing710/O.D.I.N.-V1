@@ -28,6 +28,26 @@ class ConversationRecord:
 
 
 @dataclass(slots=True)
+class ConversationSummaryRecord:
+    convo_id: int
+    user_id: int
+    started_at: datetime
+    title: str | None
+    message_count: int
+    last_activity_at: datetime
+
+    def to_api(self) -> dict[str, Any]:
+        return {
+            "convo_id": self.convo_id,
+            "user_id": self.user_id,
+            "started_at": self.started_at,
+            "title": self.title,
+            "message_count": self.message_count,
+            "last_activity_at": self.last_activity_at,
+        }
+
+
+@dataclass(slots=True)
 class MessageRecord:
     msg_id: int
     convo_id: int
@@ -164,6 +184,28 @@ class MemoryManager:
         if row is None:
             raise ValueError(f"Conversation not found: {convo_id}")
         return self._conversation_from_row(row)
+
+    def list_conversations(self, user_id: int, limit: int = 25) -> list[ConversationSummaryRecord]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                  c.convo_id,
+                  c.user_id,
+                  c.started_at,
+                  c.title,
+                  COUNT(m.msg_id) AS message_count,
+                  COALESCE(MAX(m.created_at), c.started_at) AS last_activity_at
+                FROM conversations c
+                LEFT JOIN messages m ON m.convo_id = c.convo_id
+                WHERE c.user_id = ?
+                GROUP BY c.convo_id, c.user_id, c.started_at, c.title
+                ORDER BY last_activity_at DESC, c.convo_id DESC
+                LIMIT ?
+                """,
+                (user_id, limit),
+            ).fetchall()
+        return [self._conversation_summary_from_row(row) for row in rows]
 
     def add_message(
         self,
@@ -509,6 +551,17 @@ class MemoryManager:
             user_id=row["user_id"],
             started_at=cls._parse_datetime(row["started_at"]),
             title=row["title"],
+        )
+
+    @classmethod
+    def _conversation_summary_from_row(cls, row: sqlite3.Row) -> ConversationSummaryRecord:
+        return ConversationSummaryRecord(
+            convo_id=row["convo_id"],
+            user_id=row["user_id"],
+            started_at=cls._parse_datetime(row["started_at"]),
+            title=row["title"],
+            message_count=row["message_count"],
+            last_activity_at=cls._parse_datetime(row["last_activity_at"]),
         )
 
     @classmethod

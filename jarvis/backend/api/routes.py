@@ -10,6 +10,8 @@ from jarvis.backend.api.models import (
     BotExecResponse,
     ChatRequest,
     ChatResponse,
+    ConversationMessageResponse,
+    ConversationSummaryResponse,
     EventResponse,
     IntegrityResponse,
     MemoryItem,
@@ -64,6 +66,35 @@ def query_memory(
     user = core.memory.get_or_create_user(request.username)
     rows = core.memory.query_messages(user.user_id, request.query, request.limit)
     return MemoryQueryResponse(results=[MemoryItem(**row.to_api()) for row in rows])
+
+
+@router.get("/conversations", response_model=list[ConversationSummaryResponse])
+def list_conversations(
+    username: str = "local-user",
+    limit: int = 25,
+    core: JarvisCore = Depends(get_core),
+) -> list[ConversationSummaryResponse]:
+    user = core.memory.get_or_create_user(username)
+    conversations = core.memory.list_conversations(user.user_id, limit)
+    return [ConversationSummaryResponse(**conversation.to_api()) for conversation in conversations]
+
+
+@router.get(
+    "/conversations/{conversation_id}/messages",
+    response_model=list[ConversationMessageResponse],
+)
+def list_conversation_messages(
+    conversation_id: int,
+    username: str = "local-user",
+    core: JarvisCore = Depends(get_core),
+) -> list[ConversationMessageResponse]:
+    user = core.memory.get_or_create_user(username)
+    try:
+        core.memory.get_conversation(conversation_id, user.user_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    rows = core.memory.list_conversation_messages(conversation_id)
+    return [ConversationMessageResponse(**row.to_api()) for row in rows]
 
 
 @router.post("/bot/{bot_name}/exec", response_model=BotExecResponse)

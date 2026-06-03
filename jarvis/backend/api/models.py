@@ -38,6 +38,23 @@ class MemoryQueryResponse(BaseModel):
     results: list[MemoryItem]
 
 
+class ConversationSummaryResponse(BaseModel):
+    convo_id: int
+    user_id: int
+    started_at: datetime
+    title: str | None
+    message_count: int
+    last_activity_at: datetime
+
+
+class ConversationMessageResponse(BaseModel):
+    msg_id: int
+    convo_id: int
+    role: str
+    content: str
+    created_at: datetime
+
+
 class BotExecRequest(BaseModel):
     action: str = Field(min_length=1)
     payload: dict[str, Any] = Field(default_factory=dict)

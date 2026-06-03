@@ -40,6 +40,16 @@ export function fetchModels() {
   return request("/api/v1/models");
 }
 
+export function fetchConversations(username = "local-user") {
+  return request(`/api/v1/conversations?username=${encodeURIComponent(username)}`);
+}
+
+export function fetchConversationMessages(conversationId, username = "local-user") {
+  return request(
+    `/api/v1/conversations/${conversationId}/messages?username=${encodeURIComponent(username)}`,
+  );
+}
+
 export function fetchTasks(username = "local-user") {
   return request(`/api/v1/tasks?username=${encodeURIComponent(username)}`);
 }

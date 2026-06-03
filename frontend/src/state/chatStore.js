@@ -5,6 +5,13 @@ export const useChatStore = create((set) => ({
   tasks: [],
   voiceState: "idle",
   clearMessages: () => set({ messages: [] }),
+  setMessages: (messages) =>
+    set({
+      messages: messages.map((message) => ({
+        id: message.id || crypto.randomUUID(),
+        ...message,
+      })),
+    }),
   addMessage: (message) =>
     set((state) => ({
       messages: state.messages.some(

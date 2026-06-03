@@ -506,6 +506,77 @@ textarea {
   flex: 1;
 }
 
+.conversation-history {
+  display: grid;
+  gap: 10px;
+  max-width: 980px;
+  padding: 12px;
+  background: rgba(16, 20, 26, 0.58);
+  border: 1px solid #2a3340;
+  border-radius: 8px;
+}
+
+.conversation-history-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.conversation-history-heading h2 {
+  margin: 0;
+  font-size: 0.94rem;
+}
+
+.conversation-history-heading button {
+  padding: 6px 10px;
+  color: #d8e1ec;
+  background: #10141a;
+  border: 1px solid #2a3340;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.conversation-history-heading button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.conversation-list {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.conversation-list button {
+  display: grid;
+  gap: 4px;
+  min-width: min(260px, 72vw);
+  padding: 10px 12px;
+  color: #f4f7fb;
+  text-align: left;
+  background: #171c24;
+  border: 1px solid #2a3340;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.conversation-list button.active {
+  border-color: #f1c453;
+  box-shadow: 0 0 0 1px rgba(241, 196, 83, 0.24);
+}
+
+.conversation-list span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conversation-list small {
+  color: #8ea0b6;
+}
+
 .message-list {
   display: flex;
   flex-direction: column;

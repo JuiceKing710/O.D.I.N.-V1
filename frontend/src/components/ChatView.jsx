@@ -1,7 +1,12 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useSpeechRecognition } from "../hooks/useSpeechRecognition.js";
 import { useSpeechSynthesis } from "../hooks/useSpeechSynthesis.js";
-import { fetchModels, sendChatMessage } from "../ipc/apiClient.js";
+import {
+  fetchConversationMessages,
+  fetchConversations,
+  fetchModels,
+  sendChatMessage,
+} from "../ipc/apiClient.js";
 import { useAppState } from "../state/appContext.jsx";
 import { useChatStore } from "../state/chatStore.js";
 
@@ -10,6 +15,9 @@ const SCROLL_BOTTOM_THRESHOLD = 96;
 
 export function ChatView({ onOpenCoreFocus }) {
   const [input, setInput] = useState("");
+  const [conversationError, setConversationError] = useState("");
+  const [conversations, setConversations] = useState([]);
+  const [conversationsLoading, setConversationsLoading] = useState(false);
   const [isPinnedToLatest, setIsPinnedToLatest] = useState(true);
   const [voiceEnabled, setVoiceEnabled] = useState(true);
   const [speakingMessageId, setSpeakingMessageId] = useState("");
@@ -27,6 +35,7 @@ export function ChatView({ onOpenCoreFocus }) {
   const messages = useChatStore((state) => state.messages);
   const addMessage = useChatStore((state) => state.addMessage);
   const clearMessages = useChatStore((state) => state.clearMessages);
+  const setMessages = useChatStore((state) => state.setMessages);
   const voiceState = useChatStore((state) => state.voiceState);
   const setVoiceState = useChatStore((state) => state.setVoiceState);
   const speech = useSpeechSynthesis({
@@ -54,6 +63,19 @@ export function ChatView({ onOpenCoreFocus }) {
   const visibleMessages = messages.slice(-MESSAGE_RENDER_LIMIT);
   const hiddenMessageCount = Math.max(messages.length - visibleMessages.length, 0);
 
+  async function refreshConversations() {
+    setConversationsLoading(true);
+    setConversationError("");
+    try {
+      const response = await fetchConversations(currentUser.username);
+      setConversations(response);
+    } catch (error) {
+      setConversationError(error.message);
+    } finally {
+      setConversationsLoading(false);
+    }
+  }
+
   useEffect(() => {
     let cancelled = false;
     fetchModels()
@@ -79,6 +101,10 @@ export function ChatView({ onOpenCoreFocus }) {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    refreshConversations();
+  }, [currentUser.username]);
 
   useEffect(() => {
     if (isPinnedToLatest) {
@@ -141,6 +167,39 @@ export function ChatView({ onOpenCoreFocus }) {
     requestAnimationFrame(() => inputRef.current?.focus());
   }
 
+  async function openConversation(nextConversationId) {
+    stopSpeech();
+    setConversationError("");
+    try {
+      const response = await fetchConversationMessages(nextConversationId, currentUser.username);
+      setConversationId(nextConversationId);
+      setMessages(
+        response.map((message) => ({
+          id: `message-${message.msg_id}`,
+          role: message.role,
+          content: message.content,
+          conversationId: message.convo_id,
+        })),
+      );
+      setInput("");
+      setIsPinnedToLatest(true);
+      setShowJumpLatest(false);
+      requestAnimationFrame(() => {
+        messageEndRef.current?.scrollIntoView({ block: "end" });
+        inputRef.current?.focus();
+      });
+    } catch (error) {
+      setConversationError(error.message);
+    }
+  }
+
+  function formatConversationTime(value) {
+    return new Intl.DateTimeFormat(undefined, {
+      dateStyle: "short",
+      timeStyle: "short",
+    }).format(new Date(value));
+  }
+
   async function sendMessage(rawText) {
     const text = rawText.trim();
     if (!text) {
@@ -157,6 +216,7 @@ export function ChatView({ onOpenCoreFocus }) {
         username: currentUser.username,
       });
       setConversationId(response.conversation_id);
+      await refreshConversations();
       const assistantMessage = {
         conversationId: response.conversation_id || conversationId,
         id: crypto.randomUUID(),
@@ -261,12 +321,43 @@ export function ChatView({ onOpenCoreFocus }) {
         <p className="error provider-notice">{providerMessage}</p>
       )}
       {recognition.error && <p className="voice-notice">{recognition.error}</p>}
+      {conversationError && <p className="error provider-notice">{conversationError}</p>}
       {recognition.transcript && (
         <div className="dictation-preview">
           <span>Heard</span>
           <p>{recognition.transcript}</p>
         </div>
       )}
+      <section className="conversation-history" aria-label="Conversation history">
+        <div className="conversation-history-heading">
+          <h2>History</h2>
+          <button type="button" onClick={refreshConversations} disabled={conversationsLoading}>
+            Refresh
+          </button>
+        </div>
+        {conversations.length ? (
+          <div className="conversation-list">
+            {conversations.map((conversation) => (
+              <button
+                key={conversation.convo_id}
+                className={conversation.convo_id === conversationId ? "active" : ""}
+                type="button"
+                onClick={() => openConversation(conversation.convo_id)}
+              >
+                <span>{conversation.title || `Conversation #${conversation.convo_id}`}</span>
+                <small>
+                  #{conversation.convo_id} · {conversation.message_count} messages ·{" "}
+                  {formatConversationTime(conversation.last_activity_at)}
+                </small>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="empty-state">
+            {conversationsLoading ? "Loading conversations..." : "No conversations yet."}
+          </div>
+        )}
+      </section>
       <div className="message-stage">
         <div
           className="message-list"
