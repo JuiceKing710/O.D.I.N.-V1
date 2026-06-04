@@ -99,10 +99,10 @@ class SettingsResponse(BaseModel):
 
 
 class SettingsUpdateRequest(BaseModel):
-    voice_mode: str | None = None
+    voice_mode: Literal["push_to_talk", "always_listening", "disabled"] | None = None
     model_name: str | None = None
-    theme: str | None = None
-    permissions: dict[str, str] | None = None
+    theme: Literal["system", "dark", "light"] | None = None
+    permissions: dict[str, Literal["allowed", "denied", "prompt"]] | None = None
 
 
 class ModelInfo(BaseModel):

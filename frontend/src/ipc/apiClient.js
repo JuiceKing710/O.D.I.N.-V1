@@ -36,6 +36,13 @@ export function fetchSettings() {
   return request("/api/v1/settings");
 }
 
+export function updateSettings(patch) {
+  return request("/api/v1/settings", {
+    method: "PUT",
+    body: JSON.stringify(patch),
+  });
+}
+
 export function fetchModels() {
   return request("/api/v1/models");
 }

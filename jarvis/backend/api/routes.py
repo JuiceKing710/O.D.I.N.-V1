@@ -28,6 +28,7 @@ from jarvis.backend.api.models import (
 from jarvis.backend.core.app_factory import (
     get_core,
     get_event_bus,
+    get_permission_manager,
     get_recovery_manager,
     get_settings_store,
 )
@@ -36,8 +37,19 @@ from jarvis.backend.core.event_bus import EventBus
 from jarvis.backend.core.jarvis_core import JarvisCore
 from jarvis.backend.core.recovery_manager import RecoveryManager
 from jarvis.backend.core.settings_store import SettingsStore
+from jarvis.backend.utils.permissions import PermissionManager
 
 router = APIRouter(prefix="/api/v1")
+
+
+def _settings_response(
+    settings: SettingsStore, permission_manager: PermissionManager
+) -> SettingsResponse:
+    data = settings.read()
+    stored_permissions = data.get("permissions") or {}
+    permission_manager.update_decisions(stored_permissions)
+    data["permissions"] = permission_manager.as_settings()
+    return SettingsResponse(**data)
 
 
 @router.post("/chat", response_model=ChatResponse)
@@ -162,15 +174,30 @@ def update_task(
 
 
 @router.get("/settings", response_model=SettingsResponse)
-def get_settings(settings: SettingsStore = Depends(get_settings_store)) -> SettingsResponse:
-    return SettingsResponse(**settings.read())
+def get_settings(
+    settings: SettingsStore = Depends(get_settings_store),
+    permission_manager: PermissionManager = Depends(get_permission_manager),
+) -> SettingsResponse:
+    try:
+        return _settings_response(settings, permission_manager)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.put("/settings", response_model=SettingsResponse)
 def update_settings(
-    request: SettingsUpdateRequest, settings: SettingsStore = Depends(get_settings_store)
+    request: SettingsUpdateRequest,
+    settings: SettingsStore = Depends(get_settings_store),
+    permission_manager: PermissionManager = Depends(get_permission_manager),
 ) -> SettingsResponse:
-    return SettingsResponse(**settings.update(request.model_dump(exclude_none=True)))
+    patch = request.model_dump(exclude_none=True)
+    try:
+        if "permissions" in patch:
+            permission_manager.update_decisions(patch["permissions"])
+        settings.update(patch)
+        return _settings_response(settings, permission_manager)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/models", response_model=ModelsResponse)

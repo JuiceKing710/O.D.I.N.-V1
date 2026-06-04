@@ -12,6 +12,7 @@ from jarvis.backend.bots.system_bot import SystemBot
 from jarvis.backend.core.app_factory import (
     get_core,
     get_event_bus,
+    get_permission_manager,
     get_recovery_manager,
     get_settings_store,
 )
@@ -69,6 +70,7 @@ class ApiTests(unittest.TestCase):
                 "read_files": Permission("read_files", "read files", PermissionDecision.PROMPT),
             }
         )
+        self.permission_manager = permission_manager
         self.event_bus = EventBus()
         audit_logger = AuditLogger(base / "audit.log")
         self.memory = MemoryManager(base / "jarvis.db")
@@ -87,6 +89,7 @@ class ApiTests(unittest.TestCase):
         app = create_app()
         app.dependency_overrides[get_core] = lambda: self.core
         app.dependency_overrides[get_event_bus] = lambda: self.event_bus
+        app.dependency_overrides[get_permission_manager] = lambda: self.permission_manager
         app.dependency_overrides[get_recovery_manager] = lambda: self.recovery
         app.dependency_overrides[get_settings_store] = lambda: self.settings
         self.client = TestClient(app)
@@ -184,6 +187,38 @@ class ApiTests(unittest.TestCase):
         fetched = self.client.get("/api/v1/settings")
         self.assertEqual(fetched.status_code, 200)
         self.assertEqual(fetched.json()["theme"], "dark")
+
+    def test_settings_include_manifest_permissions(self) -> None:
+        response = self.client.get("/api/v1/settings")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["permissions"]["execute_scripts"], "denied")
+        self.assertEqual(response.json()["permissions"]["read_files"], "prompt")
+
+    def test_settings_permission_update_affects_bot_execution(self) -> None:
+        updated = self.client.put(
+            "/api/v1/settings",
+            json={"permissions": {"execute_scripts": "allowed"}},
+        )
+        self.assertEqual(updated.status_code, 200)
+        self.assertEqual(updated.json()["permissions"]["execute_scripts"], "allowed")
+
+        response = self.client.post(
+            "/api/v1/bot/system/exec",
+            json={"action": "execute", "payload": {"text": "date"}},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["ok"])
+
+    def test_settings_reject_unknown_permission(self) -> None:
+        response = self.client.put(
+            "/api/v1/settings",
+            json={"permissions": {"unknown_permission": "allowed"}},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Unknown permission", response.json()["detail"])
 
     def test_local_frontend_cors_preflight(self) -> None:
         response = self.client.options(

@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { fetchSettings } from "../ipc/apiClient.js";
+import { fetchSettings, updateSettings } from "../ipc/apiClient.js";
 
 const DEFAULT_USER = {
   displayName: "Local User",
@@ -33,6 +33,21 @@ export function AppStateProvider({ children }) {
     }
   }, []);
 
+  const saveSettings = useCallback(async (patch) => {
+    setSettingsLoading(true);
+    setSettingsError("");
+    try {
+      const nextSettings = await updateSettings(patch);
+      setSettings(nextSettings);
+      return nextSettings;
+    } catch (error) {
+      setSettingsError(error.message);
+      throw error;
+    } finally {
+      setSettingsLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     refreshSettings().catch(() => {
       // Consumers render settingsError; startup should keep the app shell usable.
@@ -44,6 +59,7 @@ export function AppStateProvider({ children }) {
       conversationId,
       currentUser,
       refreshSettings,
+      saveSettings,
       setConversationId,
       setCurrentUser,
       settings,
@@ -55,6 +71,7 @@ export function AppStateProvider({ children }) {
       conversationId,
       currentUser,
       refreshSettings,
+      saveSettings,
       settings,
       settingsError,
       settingsLoading,

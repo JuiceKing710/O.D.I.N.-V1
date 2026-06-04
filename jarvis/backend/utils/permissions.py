@@ -43,6 +43,20 @@ class PermissionManager:
             return PermissionDecision.DENIED
         return permission.default
 
+    def update_decisions(self, decisions: dict[str, str]) -> None:
+        updated = dict(self._permissions)
+        for name, raw_decision in decisions.items():
+            permission = self._permissions.get(name)
+            if permission is None:
+                raise ValueError(f"Unknown permission: {name}")
+            decision = PermissionDecision(raw_decision)
+            updated[name] = Permission(
+                name=permission.name,
+                description=permission.description,
+                default=decision,
+            )
+        self._permissions = updated
+
     def require_allowed(self, permission_name: str) -> None:
         decision = self.decision_for(permission_name)
         if decision != PermissionDecision.ALLOWED:
@@ -50,4 +64,3 @@ class PermissionManager:
 
     def as_settings(self) -> dict[str, str]:
         return {name: permission.default.value for name, permission in self._permissions.items()}
-
