@@ -15,6 +15,7 @@ from jarvis.backend.core.app_factory import (
     get_permission_manager,
     get_recovery_manager,
     get_settings_store,
+    get_voice_manager,
 )
 from jarvis.backend.core.bot_manager import BotManager
 from jarvis.backend.core.event_bus import EventBus
@@ -24,6 +25,7 @@ from jarvis.backend.core.memory_manager import MemoryManager
 from jarvis.backend.core.recovery_manager import RecoveryManager
 from jarvis.backend.core.settings_store import SettingsStore
 from jarvis.backend.core.vector_store import NullVectorStore
+from jarvis.backend.core.voice_manager import VoiceManager
 from jarvis.backend.utils.audit_logging import AuditLogger
 from jarvis.backend.utils.permissions import Permission, PermissionDecision, PermissionManager
 
@@ -86,12 +88,14 @@ class ApiTests(unittest.TestCase):
         )
         self.settings = SettingsStore(base / "settings.json")
         self.recovery = RecoveryManager(base / "jarvis.db", base / "backups", NullVectorStore())
+        self.voice = VoiceManager(event_bus=self.event_bus)
         app = create_app()
         app.dependency_overrides[get_core] = lambda: self.core
         app.dependency_overrides[get_event_bus] = lambda: self.event_bus
         app.dependency_overrides[get_permission_manager] = lambda: self.permission_manager
         app.dependency_overrides[get_recovery_manager] = lambda: self.recovery
         app.dependency_overrides[get_settings_store] = lambda: self.settings
+        app.dependency_overrides[get_voice_manager] = lambda: self.voice
         self.client = TestClient(app)
 
     def tearDown(self) -> None:
@@ -325,6 +329,33 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(event["type"], "chat.message")
         self.assertEqual(event["payload"]["role"], "user")
         self.assertEqual(event["payload"]["content"], "socket hello")
+
+    def test_voice_status_reports_adapter_state(self) -> None:
+        response = self.client.get("/api/v1/voice/status")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["state"], "idle")
+        self.assertFalse(body["stt_configured"])
+        self.assertFalse(body["tts_configured"])
+
+    def test_voice_synthesize_reports_unconfigured_adapter(self) -> None:
+        response = self.client.post(
+            "/api/v1/voice/synthesize",
+            json={"text": "hello"},
+        )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("Text-to-speech adapter is not configured", response.json()["detail"])
+
+    def test_voice_state_update_emits_websocket_event(self) -> None:
+        with self.client.websocket_connect("/api/v1/events") as websocket:
+            response = self.client.post("/api/v1/voice/state", json={"state": "listening"})
+            self.assertEqual(response.status_code, 200)
+            event = websocket.receive_json()
+
+        self.assertEqual(event["type"], "voice.state")
+        self.assertEqual(event["payload"]["state"], "listening")
 
     def test_recovery_integrity_reports_sqlite_health(self) -> None:
         self.memory.get_or_create_user("health-user")

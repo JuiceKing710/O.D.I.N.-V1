@@ -1,5 +1,9 @@
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
 
+export function resolveApiUrl(path) {
+  return new URL(path, API_BASE_URL).toString();
+}
+
 async function request(path, options = {}) {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     headers: {
@@ -36,6 +40,20 @@ export function fetchSettings() {
   return request("/api/v1/settings");
 }
 
+export function fetchVoiceStatus() {
+  return request("/api/v1/voice/status");
+}
+
+export function synthesizeVoice({ text, voiceName = null }) {
+  return request("/api/v1/voice/synthesize", {
+    method: "POST",
+    body: JSON.stringify({
+      text,
+      voice_name: voiceName,
+    }),
+  });
+}
+
 export function updateSettings(patch) {
   return request("/api/v1/settings", {
     method: "PUT",
@@ -45,6 +63,16 @@ export function updateSettings(patch) {
 
 export function fetchModels() {
   return request("/api/v1/models");
+}
+
+export function checkRecoveryIntegrity() {
+  return request("/api/v1/recovery/integrity");
+}
+
+export function createRecoveryBackup() {
+  return request("/api/v1/recovery/backups", {
+    method: "POST",
+  });
 }
 
 export function fetchConversations(username = "local-user") {

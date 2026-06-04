@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse
 
 from jarvis.backend.api.models import (
     BackupResponse,
@@ -24,6 +26,12 @@ from jarvis.backend.api.models import (
     TaskCreateRequest,
     TaskResponse,
     TaskUpdateRequest,
+    VoiceStateRequest,
+    VoiceStatusResponse,
+    VoiceSynthesizeRequest,
+    VoiceSynthesizeResponse,
+    VoiceTranscribeRequest,
+    VoiceTranscribeResponse,
 )
 from jarvis.backend.core.app_factory import (
     get_core,
@@ -31,12 +39,14 @@ from jarvis.backend.core.app_factory import (
     get_permission_manager,
     get_recovery_manager,
     get_settings_store,
+    get_voice_manager,
 )
 from jarvis.backend.core.bot_manager import BotMessage
 from jarvis.backend.core.event_bus import EventBus
 from jarvis.backend.core.jarvis_core import JarvisCore
 from jarvis.backend.core.recovery_manager import RecoveryManager
 from jarvis.backend.core.settings_store import SettingsStore
+from jarvis.backend.core.voice_manager import VoiceManager, VoiceState
 from jarvis.backend.utils.permissions import PermissionManager
 
 router = APIRouter(prefix="/api/v1")
@@ -247,6 +257,76 @@ async def events_socket(websocket: WebSocket, event_bus: EventBus = Depends(get_
         pass
     finally:
         event_bus.unsubscribe(queue)
+
+
+@router.get("/voice/status", response_model=VoiceStatusResponse)
+def voice_status(voice_manager: VoiceManager = Depends(get_voice_manager)) -> VoiceStatusResponse:
+    status = voice_manager.status()
+    return VoiceStatusResponse(
+        state=status.state.value,
+        stt_adapter=status.stt_adapter,
+        stt_configured=status.stt_configured,
+        tts_adapter=status.tts_adapter,
+        tts_configured=status.tts_configured,
+    )
+
+
+@router.post("/voice/state", response_model=VoiceStatusResponse)
+def update_voice_state(
+    request: VoiceStateRequest,
+    voice_manager: VoiceManager = Depends(get_voice_manager),
+) -> VoiceStatusResponse:
+    voice_manager.transition(VoiceState(request.state))
+    return voice_status(voice_manager)
+
+
+@router.post("/voice/transcribe", response_model=VoiceTranscribeResponse)
+def transcribe_voice(
+    request: VoiceTranscribeRequest,
+    voice_manager: VoiceManager = Depends(get_voice_manager),
+) -> VoiceTranscribeResponse:
+    try:
+        transcript = voice_manager.transcribe(request.audio_path)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return VoiceTranscribeResponse(
+        transcript=transcript,
+        state=voice_manager.status().state.value,
+    )
+
+
+@router.post("/voice/synthesize", response_model=VoiceSynthesizeResponse)
+def synthesize_voice(
+    request: VoiceSynthesizeRequest,
+    voice_manager: VoiceManager = Depends(get_voice_manager),
+) -> VoiceSynthesizeResponse:
+    try:
+        audio_path = voice_manager.synthesize(request.text, request.voice_name)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return VoiceSynthesizeResponse(
+        audio_path=str(audio_path),
+        audio_url=f"/api/v1/voice/audio/{audio_path.name}",
+        state=voice_manager.status().state.value,
+    )
+
+
+@router.get("/voice/audio/{filename}")
+def voice_audio(
+    filename: str,
+    voice_manager: VoiceManager = Depends(get_voice_manager),
+) -> FileResponse:
+    status = voice_manager.status()
+    if not status.tts_configured:
+        raise HTTPException(status_code=404, detail="Text-to-speech adapter is not configured")
+    tts_adapter = voice_manager.tts_adapter
+    output_dir = getattr(tts_adapter, "output_dir", None)
+    if output_dir is None:
+        raise HTTPException(status_code=404, detail="Voice audio output is not configured")
+    audio_path = (Path(output_dir) / filename).resolve()
+    if audio_path.parent != Path(output_dir).resolve() or not audio_path.is_file():
+        raise HTTPException(status_code=404, detail=f"Voice audio not found: {filename}")
+    return FileResponse(audio_path)
 
 
 @router.get("/recovery/integrity", response_model=IntegrityResponse)

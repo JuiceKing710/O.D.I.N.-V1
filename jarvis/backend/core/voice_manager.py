@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import shlex
+import shutil
+import subprocess
+import uuid
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -23,23 +27,132 @@ class InterruptionConfig:
 
 
 class SpeechToTextAdapter(Protocol):
+    name: str
+    configured: bool
+
     def transcribe(self, audio_path: Path) -> str:
         raise NotImplementedError
 
 
 class TextToSpeechAdapter(Protocol):
+    name: str
+    configured: bool
+
     def synthesize(self, text: str, voice_name: str | None = None) -> Path:
         raise NotImplementedError
 
 
 class UnconfiguredSpeechToTextAdapter:
+    name = "unconfigured"
+    configured = False
+
     def transcribe(self, audio_path: Path) -> str:
         raise RuntimeError("Speech-to-text adapter is not configured")
 
 
 class UnconfiguredTextToSpeechAdapter:
+    name = "unconfigured"
+    configured = False
+
     def synthesize(self, text: str, voice_name: str | None = None) -> Path:
         raise RuntimeError("Text-to-speech adapter is not configured")
+
+
+class WhisperCommandSpeechToTextAdapter:
+    name = "whisper-command"
+    configured = True
+
+    def __init__(self, command: str) -> None:
+        self.command = command
+
+    def transcribe(self, audio_path: Path) -> str:
+        if not audio_path.is_file():
+            raise RuntimeError(f"Audio file not found: {audio_path}")
+        command = self.command.format(audio_path=shlex.quote(str(audio_path)))
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            check=False,
+            shell=True,
+            text=True,
+            timeout=120,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr.strip() or "Whisper transcription failed")
+        transcript = result.stdout.strip()
+        if not transcript:
+            raise RuntimeError("Whisper transcription returned no text")
+        return transcript
+
+
+class MacOSTextToSpeechAdapter:
+    name = "macos-say"
+    configured = True
+
+    def __init__(self, output_dir: Path | str) -> None:
+        self.output_dir = Path(output_dir)
+
+    @classmethod
+    def available(cls) -> bool:
+        return shutil.which("say") is not None
+
+    def synthesize(self, text: str, voice_name: str | None = None) -> Path:
+        cleaned = text.strip()
+        if not cleaned:
+            raise RuntimeError("Text is required for speech synthesis")
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        target = self.output_dir / f"jarvis-{uuid.uuid4().hex}.aiff"
+        command = ["say", "-o", str(target)]
+        if voice_name:
+            command.extend(["-v", voice_name])
+        command.append(cleaned)
+        result = subprocess.run(command, capture_output=True, check=False, text=True, timeout=120)
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr.strip() or "macOS speech synthesis failed")
+        return target
+
+
+class CommandTextToSpeechAdapter:
+    name = "tts-command"
+    configured = True
+
+    def __init__(self, command: str, output_dir: Path | str) -> None:
+        self.command = command
+        self.output_dir = Path(output_dir)
+
+    def synthesize(self, text: str, voice_name: str | None = None) -> Path:
+        cleaned = text.strip()
+        if not cleaned:
+            raise RuntimeError("Text is required for speech synthesis")
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        target = self.output_dir / f"jarvis-{uuid.uuid4().hex}.wav"
+        command = self.command.format(
+            output_path=shlex.quote(str(target)),
+            text=shlex.quote(cleaned),
+            voice_name=shlex.quote(voice_name or ""),
+        )
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            check=False,
+            shell=True,
+            text=True,
+            timeout=120,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr.strip() or "Speech synthesis command failed")
+        if not target.is_file():
+            raise RuntimeError(f"Speech synthesis did not create output: {target}")
+        return target
+
+
+@dataclass(frozen=True, slots=True)
+class VoiceStatus:
+    state: VoiceState
+    stt_adapter: str
+    stt_configured: bool
+    tts_adapter: str
+    tts_configured: bool
 
 
 class VoiceManager:
@@ -63,13 +176,28 @@ class VoiceManager:
         if self.event_bus is not None:
             self.event_bus.publish("voice.state", {"state": state.value})
 
+    def status(self) -> VoiceStatus:
+        return VoiceStatus(
+            state=self.state,
+            stt_adapter=self.stt_adapter.name,
+            stt_configured=self.stt_adapter.configured,
+            tts_adapter=self.tts_adapter.name,
+            tts_configured=self.tts_adapter.configured,
+        )
+
     def transcribe(self, audio_path: Path | str) -> str:
         self.transition(VoiceState.THINKING)
-        return self.stt_adapter.transcribe(Path(audio_path))
+        try:
+            return self.stt_adapter.transcribe(Path(audio_path))
+        finally:
+            self.transition(VoiceState.IDLE)
 
     def synthesize(self, text: str, voice_name: str | None = None) -> Path:
         self.transition(VoiceState.SPEAKING)
-        return self.tts_adapter.synthesize(text, voice_name)
+        try:
+            return self.tts_adapter.synthesize(text, voice_name)
+        finally:
+            self.transition(VoiceState.IDLE)
 
     def detect_interruption(self, normalized_energy: float) -> bool:
         if self.state != VoiceState.SPEAKING:

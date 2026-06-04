@@ -135,6 +135,38 @@ class EventResponse(BaseModel):
     created_at: str
 
 
+class VoiceStateRequest(BaseModel):
+    state: Literal["idle", "listening", "thinking", "speaking"]
+
+
+class VoiceStatusResponse(BaseModel):
+    state: Literal["idle", "listening", "thinking", "speaking"]
+    stt_adapter: str
+    stt_configured: bool
+    tts_adapter: str
+    tts_configured: bool
+
+
+class VoiceTranscribeRequest(BaseModel):
+    audio_path: str = Field(min_length=1)
+
+
+class VoiceTranscribeResponse(BaseModel):
+    transcript: str
+    state: Literal["idle", "listening", "thinking", "speaking"]
+
+
+class VoiceSynthesizeRequest(BaseModel):
+    text: str = Field(min_length=1)
+    voice_name: str | None = None
+
+
+class VoiceSynthesizeResponse(BaseModel):
+    audio_path: str
+    audio_url: str
+    state: Literal["idle", "listening", "thinking", "speaking"]
+
+
 class IntegrityResponse(BaseModel):
     ok: bool
     sqlite_ok: bool

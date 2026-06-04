@@ -16,7 +16,14 @@ from jarvis.backend.core.memory_manager import MemoryManager
 from jarvis.backend.core.recovery_manager import RecoveryManager
 from jarvis.backend.core.settings_store import SettingsStore
 from jarvis.backend.core.vector_store import ChromaVectorStore, NullVectorStore, VectorStoreInterface
-from jarvis.backend.core.voice_manager import VoiceManager
+from jarvis.backend.core.voice_manager import (
+    CommandTextToSpeechAdapter,
+    MacOSTextToSpeechAdapter,
+    UnconfiguredSpeechToTextAdapter,
+    UnconfiguredTextToSpeechAdapter,
+    VoiceManager,
+    WhisperCommandSpeechToTextAdapter,
+)
 from jarvis.backend.utils.audit_logging import AuditLogger
 from jarvis.backend.utils.permissions import PermissionManager
 
@@ -73,7 +80,25 @@ def get_recovery_manager() -> RecoveryManager:
 
 @lru_cache(maxsize=1)
 def get_voice_manager() -> VoiceManager:
-    return VoiceManager(event_bus=get_event_bus())
+    voice_output_dir = Path(os.environ.get("JARVIS_VOICE_OUTPUT_DIR", "data/voice"))
+    stt_command = os.environ.get("JARVIS_WHISPER_COMMAND")
+    tts_command = os.environ.get("JARVIS_TTS_COMMAND")
+    stt_adapter = (
+        WhisperCommandSpeechToTextAdapter(stt_command)
+        if stt_command
+        else UnconfiguredSpeechToTextAdapter()
+    )
+    if tts_command:
+        tts_adapter = CommandTextToSpeechAdapter(tts_command, voice_output_dir)
+    elif MacOSTextToSpeechAdapter.available():
+        tts_adapter = MacOSTextToSpeechAdapter(voice_output_dir)
+    else:
+        tts_adapter = UnconfiguredTextToSpeechAdapter()
+    return VoiceManager(
+        stt_adapter=stt_adapter,
+        tts_adapter=tts_adapter,
+        event_bus=get_event_bus(),
+    )
 
 
 @lru_cache(maxsize=1)

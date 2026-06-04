@@ -769,6 +769,30 @@ textarea {
   opacity: 0.55;
 }
 
+.settings-action,
+.settings-actions button {
+  justify-self: start;
+  padding: 8px 12px;
+  color: #11151c;
+  background: #62d6d2;
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.settings-action:disabled,
+.settings-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.settings-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
 .inline-form {
   display: flex;
   gap: 8px;
