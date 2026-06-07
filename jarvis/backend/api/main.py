@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import os
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from jarvis.backend.api.routes import router
+from jarvis.backend.core.app_factory import get_backup_scheduler, get_core
 
 
 DEFAULT_ALLOWED_ORIGINS = [
@@ -24,7 +26,17 @@ def _allowed_origins() -> list[str]:
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="Jarvis V1.1", version="0.1.0")
+    @asynccontextmanager
+    async def lifespan(_: FastAPI):
+        get_core()
+        scheduler = get_backup_scheduler()
+        scheduler.start()
+        try:
+            yield
+        finally:
+            await scheduler.stop()
+
+    app = FastAPI(title="Jarvis V1.1", version="0.1.0", lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=_allowed_origins(),

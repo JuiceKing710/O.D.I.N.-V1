@@ -5,20 +5,24 @@ import json
 import tempfile
 import unittest
 import urllib.error
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
 from jarvis.backend.bots.base import Bot, BotRequest, BotResponse
 from jarvis.backend.bots.code_bot import CodeBot
+from jarvis.backend.bots.file_bot import FileBot
 from jarvis.backend.bots.research_bot import ResearchBot
 from jarvis.backend.bots.system_bot import SystemBot
 from jarvis.backend.core.app_factory import _ollama_timeout_seconds
+from jarvis.backend.core.backup_scheduler import BackupScheduler
 from jarvis.backend.core.bot_manager import BotManager, BotMessage
 from jarvis.backend.core.jarvis_core import JarvisCore
 from jarvis.backend.core.lm_provider import EchoLMProvider, OllamaProvider
 from jarvis.backend.core.memory_manager import MemoryManager
-from jarvis.backend.core.vector_store import InMemoryVectorStore, VectorStoreInterface
+from jarvis.backend.core.recovery_manager import RecoveryManager
+from jarvis.backend.core.vector_store import InMemoryVectorStore, NullVectorStore, VectorStoreInterface
 from jarvis.backend.core.voice_manager import InterruptionConfig, VoiceManager, VoiceState
 from jarvis.backend.utils.audit_logging import AuditLogger
 from jarvis.backend.utils.permissions import (
@@ -103,6 +107,7 @@ class CoreTests(unittest.TestCase):
                 "access_network": Permission(
                     "access_network", "access network", PermissionDecision.PROMPT
                 ),
+                "write_files": Permission("write_files", "write files", PermissionDecision.PROMPT),
                 "execute_scripts": Permission(
                     "execute_scripts", "execute scripts", PermissionDecision.DENIED
                 ),
@@ -172,6 +177,47 @@ class CoreTests(unittest.TestCase):
 
         self.assertTrue(response.ok)
         self.assertEqual(response.payload["stdout"], "hello")
+
+    def test_file_bot_writes_self_files_without_approval(self) -> None:
+        self_root = Path(self.tmp.name) / "jarvis-self"
+        target = self_root / "notes" / "ready.txt"
+        bot = FileBot(self.permissions, self.audit, self_root=self_root)
+
+        response = asyncio.run(
+            bot.on_request(
+                BotRequest(
+                    sender="test",
+                    action="write",
+                    payload={"path": str(target), "content": "ready\n"},
+                    correlation_id="1",
+                )
+            )
+        )
+
+        self.assertTrue(response.ok)
+        self.assertTrue(response.payload["self_file"])
+        self.assertEqual(target.read_text(encoding="utf-8"), "ready\n")
+
+    def test_file_bot_requires_approval_for_user_files(self) -> None:
+        self_root = Path(self.tmp.name) / "jarvis-self"
+        target = Path(self.tmp.name) / "user-files" / "notes.txt"
+        bot = FileBot(self.permissions, self.audit, self_root=self_root)
+        request = BotRequest(
+            sender="test",
+            action="write",
+            payload={"path": str(target), "content": "approved\n"},
+            correlation_id="1",
+        )
+
+        pending = asyncio.run(bot.on_request(request))
+        request_id = pending.payload["permission_request"]["request_id"]
+        self.permissions.resolve_request(request_id, PermissionDecision.ALLOWED)
+        approved = asyncio.run(bot.on_request(request))
+
+        self.assertFalse(pending.ok)
+        self.assertTrue(approved.ok)
+        self.assertFalse(approved.payload["self_file"])
+        self.assertEqual(target.read_text(encoding="utf-8"), "approved\n")
 
     def test_research_bot_returns_network_results(self) -> None:
         self.permissions.update_decisions({"access_network": "allowed"})
@@ -402,6 +448,37 @@ class CoreTests(unittest.TestCase):
     def test_ollama_timeout_env_falls_back_when_invalid(self) -> None:
         with patch.dict("os.environ", {"OLLAMA_TIMEOUT_SECONDS": "not-a-number"}):
             self.assertEqual(_ollama_timeout_seconds(), 120.0)
+
+    def test_backup_scheduler_targets_next_local_four_am(self) -> None:
+        recovery = RecoveryManager(
+            Path(self.tmp.name) / "scheduler.db",
+            Path(self.tmp.name) / "backups",
+            NullVectorStore(),
+            encryption_key="test-key",
+        )
+        scheduler = BackupScheduler(recovery, hour=4)
+        before = datetime.now().astimezone().replace(hour=3, minute=30, second=0, microsecond=0)
+        after = before.replace(hour=5)
+
+        self.assertEqual(scheduler.next_run(before).date(), before.date())
+        self.assertEqual(scheduler.next_run(before).hour, 4)
+        self.assertEqual(scheduler.next_run(after).date(), after.date() + timedelta(days=1))
+
+    def test_backup_scheduler_catches_up_after_four_am(self) -> None:
+        db_path = Path(self.tmp.name) / "catch-up.db"
+        MemoryManager(db_path)
+        recovery = RecoveryManager(
+            db_path,
+            Path(self.tmp.name) / "backups",
+            NullVectorStore(),
+            encryption_key="test-key",
+        )
+        scheduler = BackupScheduler(recovery, hour=4)
+        after_four = datetime.now().astimezone().replace(hour=5, minute=0, second=0, microsecond=0)
+
+        self.assertTrue(scheduler.needs_catch_up(after_four))
+        asyncio.run(scheduler.run_backup())
+        self.assertFalse(scheduler.needs_catch_up(after_four))
 
 
 if __name__ == "__main__":

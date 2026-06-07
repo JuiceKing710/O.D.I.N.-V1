@@ -121,6 +121,12 @@ class PermissionResolveRequest(BaseModel):
     decision: Literal["allowed", "denied"]
 
 
+class PermissionResolveResponse(BaseModel):
+    request: PermissionRequestResponse
+    decision: Literal["allowed", "denied"]
+    result: BotExecResponse | None = None
+
+
 class ModelInfo(BaseModel):
     id: str
     provider: str
@@ -209,6 +215,16 @@ class RestoreResponse(BaseModel):
     safety_backup: str | None
     created_at: datetime
     encrypted: bool
+
+
+class BackupScheduleResponse(BaseModel):
+    enabled: bool
+    hour: int
+    retention: int
+    next_run_at: datetime | None
+    last_run_at: datetime | None
+    last_backup: str | None
+    last_error: str | None
 
 
 class ReflectionRequest(BaseModel):

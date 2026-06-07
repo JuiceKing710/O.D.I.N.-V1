@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import {
   checkRecoveryIntegrity,
   createRecoveryBackup,
+  fetchBackupSchedule,
   fetchMemoryStatus,
   fetchModels,
   fetchPermissionRequests,
@@ -23,6 +24,7 @@ export function SettingsPanel() {
   const [models, setModels] = useState([]);
   const [memoryStatus, setMemoryStatus] = useState(null);
   const [backups, setBackups] = useState([]);
+  const [backupSchedule, setBackupSchedule] = useState(null);
   const [backupSnapshot, setBackupSnapshot] = useState(null);
   const [pendingPermissions, setPendingPermissions] = useState([]);
   const [provider, setProvider] = useState(null);
@@ -104,6 +106,17 @@ export function SettingsPanel() {
         if (!cancelled) {
           setBackups(availableBackups);
           setSelectedBackup(availableBackups[0]?.filename || "");
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(err.message);
+        }
+      });
+    fetchBackupSchedule()
+      .then((schedule) => {
+        if (!cancelled) {
+          setBackupSchedule(schedule);
         }
       })
       .catch((err) => {
@@ -196,11 +209,13 @@ export function SettingsPanel() {
     setSaveNotice("");
     setError("");
     try {
-      await resolvePermissionRequest(requestId, decision);
+      const resolution = await resolvePermissionRequest(requestId, decision);
       setPendingPermissions(await fetchPermissionRequests());
       setSaveNotice(
         decision === "allowed"
-          ? "Permission approved once. Retry the requested action."
+          ? resolution.result?.ok
+            ? "Permission approved and action completed."
+            : `Permission approved, but the action failed: ${resolution.result?.error || "unknown error"}`
           : "Permission request denied.",
       );
     } catch (err) {
@@ -533,6 +548,28 @@ ollama pull llama3.2`}</pre>
                   <dd>{recoveryReport.vector_ok ? "ok" : "failed"}</dd>
                   <dt>Encryption</dt>
                   <dd>{recoveryReport.details?.encryption || "unknown"}</dd>
+                  <dt>Daily backup</dt>
+                  <dd>{backupSchedule?.enabled ? `${backupSchedule.hour}:00 local time` : "disabled"}</dd>
+                  <dt>Retention</dt>
+                  <dd>{backupSchedule ? `${backupSchedule.retention} backups` : "unknown"}</dd>
+                  <dt>Next run</dt>
+                  <dd>
+                    {backupSchedule?.next_run_at
+                      ? new Date(backupSchedule.next_run_at).toLocaleString()
+                      : "when backend starts"}
+                  </dd>
+                  {backupSchedule?.last_backup && (
+                    <>
+                      <dt>Last scheduled backup</dt>
+                      <dd>{backupSchedule.last_backup}</dd>
+                    </>
+                  )}
+                  {backupSchedule?.last_error && (
+                    <>
+                      <dt>Schedule error</dt>
+                      <dd>{backupSchedule.last_error}</dd>
+                    </>
+                  )}
                 </dl>
                 {backupSnapshot && (
                   <p className="setting-note">Latest backup: {backupSnapshot.path}</p>

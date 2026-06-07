@@ -124,6 +124,14 @@ class RecoveryManager:
         ]
         return sorted(snapshots, key=lambda snapshot: snapshot.created_at, reverse=True)
 
+    def prune_backups(self, keep: int = 30) -> int:
+        if keep < 1:
+            raise ValueError("Backup retention must keep at least one backup")
+        stale = self.list_backups()[keep:]
+        for snapshot in stale:
+            snapshot.path.unlink(missing_ok=True)
+        return len(stale)
+
     def restore_sqlite_backup(self, filename: str) -> RestoreSnapshot:
         self._require_encryption_key()
         source = self._resolve_backup(filename)

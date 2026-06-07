@@ -47,3 +47,11 @@ class Bot(ABC):
         if isinstance(exc, PermissionApprovalRequired):
             payload["permission_request"] = exc.request.to_api()
         return BotResponse(ok=False, payload=payload, error=str(exc))
+
+    def permission_metadata(self, request: BotRequest) -> dict[str, Any]:
+        return {
+            "bot": self.name,
+            "action": request.action,
+            "payload": request.payload,
+            "sender": request.sender,
+        }

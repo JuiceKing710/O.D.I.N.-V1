@@ -22,6 +22,7 @@ class SystemBot(Bot):
                 "execute_scripts",
                 actor=request.sender,
                 reason=f"Execute command: {command}",
+                metadata=self.permission_metadata(request),
             )
         except PermissionError as exc:
             return self.permission_response(exc)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import binascii
 from dataclasses import asdict
@@ -10,6 +11,7 @@ from fastapi.responses import FileResponse
 
 from jarvis.backend.api.models import (
     BackupResponse,
+    BackupScheduleResponse,
     BotExecRequest,
     BotExecResponse,
     ChatRequest,
@@ -26,6 +28,7 @@ from jarvis.backend.api.models import (
     ModelsResponse,
     PermissionRequestResponse,
     PermissionResolveRequest,
+    PermissionResolveResponse,
     SettingsResponse,
     SettingsUpdateRequest,
     ReflectionRequest,
@@ -43,6 +46,7 @@ from jarvis.backend.api.models import (
     VoiceTranscribeResponse,
 )
 from jarvis.backend.core.app_factory import (
+    get_backup_scheduler,
     get_core,
     get_event_bus,
     get_permission_manager,
@@ -50,6 +54,7 @@ from jarvis.backend.core.app_factory import (
     get_settings_store,
     get_voice_manager,
 )
+from jarvis.backend.core.backup_scheduler import BackupScheduler
 from jarvis.backend.core.bot_manager import BotMessage
 from jarvis.backend.core.event_bus import EventBus
 from jarvis.backend.core.jarvis_core import JarvisCore
@@ -280,14 +285,15 @@ def list_permission_requests(
 
 @router.post(
     "/permissions/requests/{request_id}/resolve",
-    response_model=PermissionRequestResponse,
+    response_model=PermissionResolveResponse,
 )
-def resolve_permission_request(
+async def resolve_permission_request(
     request_id: str,
     request: PermissionResolveRequest,
     permission_manager: PermissionManager = Depends(get_permission_manager),
     event_bus: EventBus = Depends(get_event_bus),
-) -> PermissionRequestResponse:
+    core: JarvisCore = Depends(get_core),
+) -> PermissionResolveResponse:
     try:
         resolved = permission_manager.resolve_request(
             request_id,
@@ -296,11 +302,38 @@ def resolve_permission_request(
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     response = PermissionRequestResponse(**resolved.to_api())
+    result = None
+    retry = resolved.metadata
+    if request.decision == PermissionDecision.ALLOWED and retry.get("bot"):
+        bot_response = await core.bot_manager.dispatch(
+            BotMessage(
+                sender=str(retry.get("sender") or resolved.actor),
+                recipient=str(retry["bot"]),
+                action=str(retry.get("action") or ""),
+                payload=retry.get("payload") if isinstance(retry.get("payload"), dict) else {},
+            )
+        )
+        if bot_response is not None:
+            result = BotExecResponse(
+                bot=str(retry["bot"]),
+                action=str(retry.get("action") or ""),
+                ok=bot_response.ok,
+                payload=bot_response.payload,
+                error=bot_response.error,
+            )
     event_bus.publish(
         "permission.resolved",
-        {"request": response.model_dump(mode="json"), "decision": request.decision},
+        {
+            "request": response.model_dump(mode="json"),
+            "decision": request.decision,
+            "result": result.model_dump(mode="json") if result else None,
+        },
     )
-    return response
+    return PermissionResolveResponse(
+        request=response,
+        decision=request.decision,
+        result=result,
+    )
 
 
 @router.get("/models", response_model=ModelsResponse)
@@ -346,7 +379,7 @@ async def events_socket(websocket: WebSocket, event_bus: EventBus = Depends(get_
         while True:
             event = await queue.get()
             await websocket.send_json(event.to_api())
-    except WebSocketDisconnect:
+    except (WebSocketDisconnect, asyncio.CancelledError):
         pass
     finally:
         event_bus.unsubscribe(queue)
@@ -477,6 +510,13 @@ def list_backups(
         )
         for snapshot in recovery_manager.list_backups()
     ]
+
+
+@router.get("/recovery/schedule", response_model=BackupScheduleResponse)
+def backup_schedule(
+    scheduler: BackupScheduler = Depends(get_backup_scheduler),
+) -> BackupScheduleResponse:
+    return BackupScheduleResponse(**scheduler.status().to_api())
 
 
 @router.post("/recovery/restore", response_model=RestoreResponse)

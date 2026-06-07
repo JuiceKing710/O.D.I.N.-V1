@@ -1,17 +1,18 @@
 # Jarvis V1.1
 
-Jarvis V1.1 is a local-first assistant scaffold based on the master architecture specification.
+Jarvis V1.1 is a local-first personal assistant based on the master architecture specification.
 The repository is split into a FastAPI backend, a React/Electron frontend shell, scripts, and tests.
 
 ## Current Scope
 
-This initial build includes:
+The current build includes:
 
 - Backend API contracts for chat, memory, bots, tasks, settings, and models.
 - Core orchestration with persistent SQLite-backed conversations and messages.
-- Bot registry and protocol primitives.
-- Permission manifest loading and audit logging.
-- Voice manager and reflection engine skeletons.
+- Functional research, code analysis, system command, and file read/write bots.
+- Interactive one-time permission approvals and audit logging.
+- Voice transcription/synthesis adapters, reflection summaries, and vector-memory integration.
+- Encrypted backup, restore, daily scheduling, catch-up, and retention controls.
 - Frontend application shell with AI core, chat, dashboard, and settings components.
 - Electron desktop wrapper around the built React app.
 - Unit and API tests for core message handling, persistence, bot dispatch, permissions, CORS, tasks, and settings.
@@ -59,12 +60,22 @@ export JARVIS_TTS_COMMAND='tts-cli --text {text} --output {output_path}'
 ```
 
 Bot chat commands use `/<bot> <action> [text]`. Permissions set to `prompt` create a pending
-one-time approval in Settings; permissions set to `allowed` run without prompting:
+one-time approval in Settings. Approving it executes that exact queued action; permissions set to
+`allowed` run without prompting:
 
 ```text
 /code analyze path/to/file.py
 /research search local-first assistants
 /system execute date
+```
+
+Jarvis can write files inside its own repository without prompting. Writes outside the repository
+require one-time `write_files` approval. For chat writes, put the path on the first line and the
+new file content on the following lines:
+
+```text
+/file write notes/example.txt
+new file content
 ```
 
 The research bot performs a bounded DuckDuckGo HTML lookup, the code bot analyzes real local files,
@@ -86,6 +97,10 @@ export JARVIS_BACKUP_DIR=data/backups
 
 Backups use AES-GCM authenticated encryption. Restore validates the encrypted file and SQLite
 integrity, then creates an encrypted safety backup of the current database before replacement.
+While the backend is running, it creates a backup every day at 4:00 AM local time and retains the
+latest 30 backups. Override this with `JARVIS_BACKUP_HOUR`, `JARVIS_BACKUP_RETENTION`, or disable it
+with `JARVIS_SCHEDULED_BACKUPS=disabled`. If Jarvis starts after 4:00 AM without a backup from that
+day, it creates a catch-up backup immediately.
 
 Local frontend origins are allowed by default for development and preview. Override them with:
 

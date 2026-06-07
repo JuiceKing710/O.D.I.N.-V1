@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import StrEnum
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 
@@ -28,6 +29,7 @@ class PermissionRequest:
     actor: str
     reason: str
     created_at: datetime
+    metadata: dict[str, Any]
 
     def to_api(self) -> dict[str, str]:
         return {
@@ -94,6 +96,7 @@ class PermissionManager:
         *,
         actor: str = "user",
         reason: str = "",
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         decision = self.decision_for(permission_name)
         if decision == PermissionDecision.ALLOWED:
@@ -119,6 +122,7 @@ class PermissionManager:
             actor=actor,
             reason=reason,
             created_at=datetime.now(timezone.utc),
+            metadata=metadata or {},
         )
         self._pending_requests[request.request_id] = request
         raise PermissionApprovalRequired(request)

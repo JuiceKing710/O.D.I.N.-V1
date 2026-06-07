@@ -24,6 +24,7 @@ class ResearchBot(Bot):
                 "access_network",
                 actor=request.sender,
                 reason=f"Research search: {query}",
+                metadata=self.permission_metadata(request),
             )
         except PermissionError as exc:
             return self.permission_response(exc)

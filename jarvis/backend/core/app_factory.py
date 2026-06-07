@@ -8,6 +8,7 @@ from jarvis.backend.bots.code_bot import CodeBot
 from jarvis.backend.bots.file_bot import FileBot
 from jarvis.backend.bots.research_bot import ResearchBot
 from jarvis.backend.bots.system_bot import SystemBot
+from jarvis.backend.core.backup_scheduler import BackupScheduler
 from jarvis.backend.core.bot_manager import BotManager
 from jarvis.backend.core.event_bus import EventBus
 from jarvis.backend.core.jarvis_core import JarvisCore
@@ -41,6 +42,13 @@ def _ollama_timeout_seconds() -> float:
         return float(raw)
     except ValueError:
         return 120.0
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.environ.get(name, str(default)))
+    except ValueError:
+        return default
 
 
 @lru_cache(maxsize=1)
@@ -80,6 +88,18 @@ def get_recovery_manager() -> RecoveryManager:
 
 
 @lru_cache(maxsize=1)
+def get_backup_scheduler() -> BackupScheduler:
+    return BackupScheduler(
+        get_recovery_manager(),
+        get_event_bus(),
+        enabled=os.environ.get("JARVIS_SCHEDULED_BACKUPS", "enabled").lower()
+        not in {"0", "false", "disabled"},
+        hour=_env_int("JARVIS_BACKUP_HOUR", 4),
+        retention=_env_int("JARVIS_BACKUP_RETENTION", 30),
+    )
+
+
+@lru_cache(maxsize=1)
 def get_voice_manager() -> VoiceManager:
     voice_output_dir = Path(os.environ.get("JARVIS_VOICE_OUTPUT_DIR", "data/voice"))
     stt_command = os.environ.get("JARVIS_WHISPER_COMMAND")
@@ -113,7 +133,13 @@ def get_core() -> JarvisCore:
         audit_logger=audit_logger,
         event_bus=event_bus,
     )
-    bot_manager.register(FileBot(permission_manager, audit_logger))
+    bot_manager.register(
+        FileBot(
+            permission_manager,
+            audit_logger,
+            self_root=Path(os.environ.get("JARVIS_SELF_ROOT", PACKAGE_ROOT.parent)),
+        )
+    )
     bot_manager.register(ResearchBot(permission_manager, audit_logger))
     bot_manager.register(CodeBot(permission_manager, audit_logger))
     bot_manager.register(SystemBot(permission_manager, audit_logger))

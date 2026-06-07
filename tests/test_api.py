@@ -11,8 +11,10 @@ from fastapi.testclient import TestClient
 
 from jarvis.backend.api.main import create_app
 from jarvis.backend.bots.code_bot import CodeBot
+from jarvis.backend.bots.file_bot import FileBot
 from jarvis.backend.bots.system_bot import SystemBot
 from jarvis.backend.core.app_factory import (
+    get_backup_scheduler,
     get_core,
     get_event_bus,
     get_permission_manager,
@@ -20,6 +22,7 @@ from jarvis.backend.core.app_factory import (
     get_settings_store,
     get_voice_manager,
 )
+from jarvis.backend.core.backup_scheduler import BackupScheduler
 from jarvis.backend.core.bot_manager import BotManager
 from jarvis.backend.core.event_bus import EventBus
 from jarvis.backend.core.jarvis_core import JarvisCore
@@ -81,6 +84,7 @@ class ApiTests(unittest.TestCase):
                     "execute_scripts", "execute scripts", PermissionDecision.DENIED
                 ),
                 "read_files": Permission("read_files", "read files", PermissionDecision.PROMPT),
+                "write_files": Permission("write_files", "write files", PermissionDecision.PROMPT),
             }
         )
         self.permission_manager = permission_manager
@@ -89,6 +93,7 @@ class ApiTests(unittest.TestCase):
         self.memory = MemoryManager(base / "jarvis.db")
         bot_manager = BotManager(permission_manager, audit_logger, event_bus=self.event_bus)
         bot_manager.register(CodeBot(permission_manager, audit_logger))
+        bot_manager.register(FileBot(permission_manager, audit_logger, self_root=base / "self"))
         bot_manager.register(SystemBot(permission_manager, audit_logger))
         self.core = JarvisCore(
             memory=self.memory,
@@ -104,12 +109,14 @@ class ApiTests(unittest.TestCase):
             NullVectorStore(),
             encryption_key="test-backup-key",
         )
+        self.backup_scheduler = BackupScheduler(self.recovery, self.event_bus)
         self.voice = VoiceManager(event_bus=self.event_bus)
         app = create_app()
         app.dependency_overrides[get_core] = lambda: self.core
         app.dependency_overrides[get_event_bus] = lambda: self.event_bus
         app.dependency_overrides[get_permission_manager] = lambda: self.permission_manager
         app.dependency_overrides[get_recovery_manager] = lambda: self.recovery
+        app.dependency_overrides[get_backup_scheduler] = lambda: self.backup_scheduler
         app.dependency_overrides[get_settings_store] = lambda: self.settings
         app.dependency_overrides[get_voice_manager] = lambda: self.voice
         self.client = TestClient(app)
@@ -217,19 +224,36 @@ class ApiTests(unittest.TestCase):
             f"/api/v1/permissions/requests/{request['request_id']}/resolve",
             json={"decision": "allowed"},
         )
-        retried = self.client.post(
-            "/api/v1/bot/code/exec",
-            json={"action": "analyze", "payload": {"path": str(sample)}, "sender": "api-user"},
-        )
-        third = self.client.post(
+        next_attempt = self.client.post(
             "/api/v1/bot/code/exec",
             json={"action": "analyze", "payload": {"path": str(sample)}, "sender": "api-user"},
         )
 
         self.assertEqual(resolved.status_code, 200)
-        self.assertTrue(retried.json()["ok"])
-        self.assertFalse(third.json()["ok"])
-        self.assertIn("permission_request", third.json()["payload"])
+        self.assertTrue(resolved.json()["result"]["ok"])
+        self.assertFalse(next_attempt.json()["ok"])
+        self.assertIn("permission_request", next_attempt.json()["payload"])
+
+    def test_external_file_write_executes_after_approval(self) -> None:
+        target = Path(self.tmp.name) / "user-files" / "approved.txt"
+        requested = self.client.post(
+            "/api/v1/bot/file/exec",
+            json={
+                "action": "write",
+                "payload": {"path": str(target), "content": "approved\n"},
+                "sender": "api-user",
+            },
+        )
+
+        self.assertFalse(requested.json()["ok"])
+        request_id = requested.json()["payload"]["permission_request"]["request_id"]
+        resolved = self.client.post(
+            f"/api/v1/permissions/requests/{request_id}/resolve",
+            json={"decision": "allowed"},
+        )
+
+        self.assertTrue(resolved.json()["result"]["ok"])
+        self.assertEqual(target.read_text(encoding="utf-8"), "approved\n")
 
     def test_settings_round_trip(self) -> None:
         updated = self.client.put("/api/v1/settings", json={"theme": "dark"})
@@ -449,6 +473,14 @@ class ApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()["sqlite_ok"])
+
+    def test_recovery_schedule_reports_daily_four_am(self) -> None:
+        response = self.client.get("/api/v1/recovery/schedule")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["enabled"])
+        self.assertEqual(response.json()["hour"], 4)
+        self.assertEqual(response.json()["retention"], 30)
 
     def test_recovery_backup_missing_database_returns_404(self) -> None:
         missing = Path(self.tmp.name) / "missing.db"

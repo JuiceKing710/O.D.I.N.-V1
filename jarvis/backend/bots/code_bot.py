@@ -21,6 +21,7 @@ class CodeBot(Bot):
                 "read_files",
                 actor=request.sender,
                 reason=f"Analyze code file: {raw_path}",
+                metadata=self.permission_metadata(request),
             )
         except PermissionError as exc:
             return self.permission_response(exc)

@@ -93,6 +93,10 @@ export function fetchRecoveryBackups() {
   return request("/api/v1/recovery/backups");
 }
 
+export function fetchBackupSchedule() {
+  return request("/api/v1/recovery/schedule");
+}
+
 export function restoreRecoveryBackup(filename) {
   return request("/api/v1/recovery/restore", {
     method: "POST",
