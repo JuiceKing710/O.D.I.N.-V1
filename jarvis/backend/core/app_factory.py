@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import threading
 from functools import lru_cache
 from pathlib import Path
 
@@ -67,6 +68,11 @@ def get_event_bus() -> EventBus:
 
 
 @lru_cache(maxsize=1)
+def get_db_lock() -> threading.RLock:
+    return threading.RLock()
+
+
+@lru_cache(maxsize=1)
 def get_vector_store() -> VectorStoreInterface:
     chroma_path = os.environ.get("JARVIS_CHROMA_PATH")
     if not chroma_path:
@@ -84,6 +90,7 @@ def get_recovery_manager() -> RecoveryManager:
         backup_dir=Path(os.environ.get("JARVIS_BACKUP_DIR", "data/backups")),
         vector_store=get_vector_store(),
         encryption_key=os.environ.get("JARVIS_BACKUP_KEY"),
+        db_lock=get_db_lock(),
     )
 
 
@@ -127,7 +134,11 @@ def get_core() -> JarvisCore:
     permission_manager = get_permission_manager()
     audit_logger = AuditLogger(Path(os.environ.get("JARVIS_AUDIT_LOG", "data/audit.log")))
     event_bus = get_event_bus()
-    memory = MemoryManager(_default_db_path(), vector_store=get_vector_store())
+    memory = MemoryManager(
+        _default_db_path(),
+        vector_store=get_vector_store(),
+        db_lock=get_db_lock(),
+    )
     bot_manager = BotManager(
         permission_manager=permission_manager,
         audit_logger=audit_logger,

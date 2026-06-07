@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -157,11 +158,13 @@ class MemoryManager:
         db_path: Path | str,
         cache: TTLCache | None = None,
         vector_store: VectorStoreInterface | None = None,
+        db_lock: threading.RLock | None = None,
     ) -> None:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.cache = cache or TTLCache()
         self.vector_store = vector_store or NullVectorStore()
+        self.db_lock = db_lock or threading.RLock()
         self._initialize()
 
     def get_or_create_user(self, username: str, display_name: str | None = None) -> UserRecord:
@@ -733,14 +736,15 @@ class MemoryManager:
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys = ON")
-        try:
-            yield conn
-            conn.commit()
-        finally:
-            conn.close()
+        with self.db_lock:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA foreign_keys = ON")
+            try:
+                yield conn
+                conn.commit()
+            finally:
+                conn.close()
 
     @staticmethod
     def _parse_datetime(value: str) -> datetime:

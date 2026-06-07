@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import sqlite3
 import tempfile
+import threading
 from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -56,29 +57,32 @@ class RecoveryManager:
         backup_dir: Path | str,
         vector_store: VectorStoreInterface,
         encryption_key: str | bytes | None = None,
+        db_lock: threading.RLock | None = None,
     ) -> None:
         self.db_path = Path(db_path)
         self.backup_dir = Path(backup_dir)
         self.vector_store = vector_store
+        self.db_lock = db_lock or threading.RLock()
         self.encryption_key = (
             encryption_key.encode("utf-8") if isinstance(encryption_key, str) else encryption_key
         )
 
     def check_integrity(self) -> IntegrityReport:
-        sqlite_ok = False
-        sqlite_detail = "database does not exist"
-        if self.db_path.exists():
-            conn = None
-            try:
-                conn = sqlite3.connect(self.db_path)
-                row = conn.execute("PRAGMA integrity_check").fetchone()
-                sqlite_detail = row[0] if row else "missing integrity result"
-                sqlite_ok = sqlite_detail == "ok"
-            except sqlite3.Error as exc:
-                sqlite_detail = str(exc)
-            finally:
-                if conn is not None:
-                    conn.close()
+        with self.db_lock:
+            sqlite_ok = False
+            sqlite_detail = "database does not exist"
+            if self.db_path.exists():
+                conn = None
+                try:
+                    conn = sqlite3.connect(self.db_path)
+                    row = conn.execute("PRAGMA integrity_check").fetchone()
+                    sqlite_detail = row[0] if row else "missing integrity result"
+                    sqlite_ok = sqlite_detail == "ok"
+                except sqlite3.Error as exc:
+                    sqlite_detail = str(exc)
+                finally:
+                    if conn is not None:
+                        conn.close()
 
         vector_health = self.vector_store.health()
         return IntegrityReport(
@@ -92,23 +96,24 @@ class RecoveryManager:
         )
 
     def create_sqlite_backup(self) -> BackupSnapshot:
-        if not self.db_path.exists():
-            raise FileNotFoundError(f"Database not found: {self.db_path}")
-        self._require_encryption_key()
-        self.backup_dir.mkdir(parents=True, exist_ok=True)
-        created_at = datetime.now(timezone.utc)
-        timestamp = created_at.strftime("%Y%m%dT%H%M%S%fZ")
-        target = self.backup_dir / f"jarvis-{timestamp}.db.enc"
-        with tempfile.NamedTemporaryFile(dir=self.backup_dir, suffix=".db", delete=False) as handle:
-            temporary_path = Path(handle.name)
-        try:
-            with closing(sqlite3.connect(self.db_path)) as source:
-                with closing(sqlite3.connect(temporary_path)) as backup:
-                    source.backup(backup)
-            target.write_bytes(self._encrypt(temporary_path.read_bytes()))
-        finally:
-            temporary_path.unlink(missing_ok=True)
-        return BackupSnapshot(path=target, created_at=created_at, encrypted=True)
+        with self.db_lock:
+            if not self.db_path.exists():
+                raise FileNotFoundError(f"Database not found: {self.db_path}")
+            self._require_encryption_key()
+            self.backup_dir.mkdir(parents=True, exist_ok=True)
+            created_at = datetime.now(timezone.utc)
+            timestamp = created_at.strftime("%Y%m%dT%H%M%S%fZ")
+            target = self.backup_dir / f"jarvis-{timestamp}.db.enc"
+            with tempfile.NamedTemporaryFile(dir=self.backup_dir, suffix=".db", delete=False) as handle:
+                temporary_path = Path(handle.name)
+            try:
+                with closing(sqlite3.connect(self.db_path)) as source:
+                    with closing(sqlite3.connect(temporary_path)) as backup:
+                        source.backup(backup)
+                target.write_bytes(self._encrypt(temporary_path.read_bytes()))
+            finally:
+                temporary_path.unlink(missing_ok=True)
+            return BackupSnapshot(path=target, created_at=created_at, encrypted=True)
 
     def list_backups(self) -> list[BackupSnapshot]:
         if not self.backup_dir.exists():
@@ -133,30 +138,31 @@ class RecoveryManager:
         return len(stale)
 
     def restore_sqlite_backup(self, filename: str) -> RestoreSnapshot:
-        self._require_encryption_key()
-        source = self._resolve_backup(filename)
-        plaintext = self._decrypt(source.read_bytes())
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile(
-            dir=self.db_path.parent,
-            suffix=".restore.db",
-            delete=False,
-        ) as handle:
-            temporary_path = Path(handle.name)
-            handle.write(plaintext)
-        try:
-            self._validate_sqlite(temporary_path)
-            safety_backup = self.create_sqlite_backup() if self.db_path.exists() else None
-            os.replace(temporary_path, self.db_path)
-        finally:
-            temporary_path.unlink(missing_ok=True)
-        return RestoreSnapshot(
-            path=self.db_path,
-            restored_from=source,
-            safety_backup=safety_backup.path if safety_backup else None,
-            created_at=datetime.now(timezone.utc),
-            encrypted=True,
-        )
+        with self.db_lock:
+            self._require_encryption_key()
+            source = self._resolve_backup(filename)
+            plaintext = self._decrypt(source.read_bytes())
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile(
+                dir=self.db_path.parent,
+                suffix=".restore.db",
+                delete=False,
+            ) as handle:
+                temporary_path = Path(handle.name)
+                handle.write(plaintext)
+            try:
+                self._validate_sqlite(temporary_path)
+                safety_backup = self.create_sqlite_backup() if self.db_path.exists() else None
+                os.replace(temporary_path, self.db_path)
+            finally:
+                temporary_path.unlink(missing_ok=True)
+            return RestoreSnapshot(
+                path=self.db_path,
+                restored_from=source,
+                safety_backup=safety_backup.path if safety_backup else None,
+                created_at=datetime.now(timezone.utc),
+                encrypted=True,
+            )
 
     def _resolve_backup(self, filename: str) -> Path:
         backup_dir = self.backup_dir.resolve()

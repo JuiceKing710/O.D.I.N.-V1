@@ -96,7 +96,8 @@ export JARVIS_BACKUP_DIR=data/backups
 ```
 
 Backups use AES-GCM authenticated encryption. Restore validates the encrypted file and SQLite
-integrity, then creates an encrypted safety backup of the current database before replacement.
+integrity, coordinates with live database activity, then creates an encrypted safety backup of the
+current database before replacement.
 While the backend is running, it creates a backup every day at 4:00 AM local time and retains the
 latest 30 backups. Override this with `JARVIS_BACKUP_HOUR`, `JARVIS_BACKUP_RETENTION`, or disable it
 with `JARVIS_SCHEDULED_BACKUPS=disabled`. If Jarvis starts after 4:00 AM without a backup from that
