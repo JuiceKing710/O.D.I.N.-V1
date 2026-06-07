@@ -89,6 +89,28 @@ export function createRecoveryBackup() {
   });
 }
 
+export function fetchRecoveryBackups() {
+  return request("/api/v1/recovery/backups");
+}
+
+export function restoreRecoveryBackup(filename) {
+  return request("/api/v1/recovery/restore", {
+    method: "POST",
+    body: JSON.stringify({ filename }),
+  });
+}
+
+export function fetchPermissionRequests() {
+  return request("/api/v1/permissions/requests");
+}
+
+export function resolvePermissionRequest(requestId, decision) {
+  return request(`/api/v1/permissions/requests/${requestId}/resolve`, {
+    method: "POST",
+    body: JSON.stringify({ decision }),
+  });
+}
+
 export function fetchConversations(username = "local-user") {
   return request(`/api/v1/conversations?username=${encodeURIComponent(username)}`);
 }

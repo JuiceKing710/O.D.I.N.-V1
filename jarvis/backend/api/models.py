@@ -109,6 +109,18 @@ class SettingsUpdateRequest(BaseModel):
     permissions: dict[str, Literal["allowed", "denied", "prompt"]] | None = None
 
 
+class PermissionRequestResponse(BaseModel):
+    request_id: str
+    permission: str
+    actor: str
+    reason: str
+    created_at: datetime
+
+
+class PermissionResolveRequest(BaseModel):
+    decision: Literal["allowed", "denied"]
+
+
 class ModelInfo(BaseModel):
     id: str
     provider: str
@@ -181,7 +193,20 @@ class IntegrityResponse(BaseModel):
 
 
 class BackupResponse(BaseModel):
+    filename: str
     path: str
+    created_at: datetime
+    encrypted: bool
+
+
+class RestoreRequest(BaseModel):
+    filename: str = Field(min_length=1)
+
+
+class RestoreResponse(BaseModel):
+    path: str
+    restored_from: str
+    safety_backup: str | None
     created_at: datetime
     encrypted: bool
 

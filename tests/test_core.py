@@ -21,7 +21,12 @@ from jarvis.backend.core.memory_manager import MemoryManager
 from jarvis.backend.core.vector_store import InMemoryVectorStore, VectorStoreInterface
 from jarvis.backend.core.voice_manager import InterruptionConfig, VoiceManager, VoiceState
 from jarvis.backend.utils.audit_logging import AuditLogger
-from jarvis.backend.utils.permissions import Permission, PermissionDecision, PermissionManager
+from jarvis.backend.utils.permissions import (
+    Permission,
+    PermissionApprovalRequired,
+    PermissionDecision,
+    PermissionManager,
+)
 from jarvis.backend.utils.reflection import ReflectionEngine
 
 
@@ -199,6 +204,28 @@ class CoreTests(unittest.TestCase):
     def test_permission_defaults_are_enforced(self) -> None:
         with self.assertRaises(PermissionError):
             self.permissions.require_allowed("execute_scripts")
+
+    def test_prompt_permission_can_be_approved_once(self) -> None:
+        with self.assertRaises(PermissionApprovalRequired) as pending:
+            self.permissions.require_allowed(
+                "read_files",
+                actor="tester",
+                reason="Read file: sample.py",
+            )
+
+        self.permissions.resolve_request(pending.exception.request.request_id, PermissionDecision.ALLOWED)
+        self.permissions.require_allowed(
+            "read_files",
+            actor="tester",
+            reason="Read file: sample.py",
+        )
+
+        with self.assertRaises(PermissionApprovalRequired):
+            self.permissions.require_allowed(
+                "read_files",
+                actor="tester",
+                reason="Read file: sample.py",
+            )
 
     def test_vector_failure_falls_back_to_sqlite_query(self) -> None:
         memory = MemoryManager(Path(self.tmp.name) / "broken.db", vector_store=BrokenVectorStore())

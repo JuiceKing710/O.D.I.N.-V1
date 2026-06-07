@@ -4,9 +4,13 @@ import {
   createRecoveryBackup,
   fetchMemoryStatus,
   fetchModels,
+  fetchPermissionRequests,
+  fetchRecoveryBackups,
   fetchVoiceStatus,
   loadModel,
   resolveApiUrl,
+  resolvePermissionRequest,
+  restoreRecoveryBackup,
   synthesizeVoice,
 } from "../ipc/apiClient.js";
 import { useAppState } from "../state/appContext.jsx";
@@ -18,11 +22,14 @@ const VOICE_MODE_OPTIONS = ["push_to_talk", "always_listening", "disabled"];
 export function SettingsPanel() {
   const [models, setModels] = useState([]);
   const [memoryStatus, setMemoryStatus] = useState(null);
+  const [backups, setBackups] = useState([]);
   const [backupSnapshot, setBackupSnapshot] = useState(null);
+  const [pendingPermissions, setPendingPermissions] = useState([]);
   const [provider, setProvider] = useState(null);
   const [permissionDraft, setPermissionDraft] = useState({});
   const [recoveryLoading, setRecoveryLoading] = useState(false);
   const [recoveryReport, setRecoveryReport] = useState(null);
+  const [selectedBackup, setSelectedBackup] = useState("");
   const [selectedModel, setSelectedModel] = useState("");
   const [error, setError] = useState("");
   const [saveNotice, setSaveNotice] = useState("");
@@ -85,6 +92,29 @@ export function SettingsPanel() {
       .then((report) => {
         if (!cancelled) {
           setRecoveryReport(report);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(err.message);
+        }
+      });
+    fetchRecoveryBackups()
+      .then((availableBackups) => {
+        if (!cancelled) {
+          setBackups(availableBackups);
+          setSelectedBackup(availableBackups[0]?.filename || "");
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(err.message);
+        }
+      });
+    fetchPermissionRequests()
+      .then((requests) => {
+        if (!cancelled) {
+          setPendingPermissions(requests);
         }
       })
       .catch((err) => {
@@ -161,6 +191,25 @@ export function SettingsPanel() {
     }));
   }
 
+  async function handlePermissionRequest(requestId, decision) {
+    setSavingSettings(true);
+    setSaveNotice("");
+    setError("");
+    try {
+      await resolvePermissionRequest(requestId, decision);
+      setPendingPermissions(await fetchPermissionRequests());
+      setSaveNotice(
+        decision === "allowed"
+          ? "Permission approved once. Retry the requested action."
+          : "Permission request denied.",
+      );
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSavingSettings(false);
+    }
+  }
+
   async function handleVoiceTest() {
     setVoiceTesting(true);
     setSaveNotice("");
@@ -204,8 +253,34 @@ export function SettingsPanel() {
     try {
       const snapshot = await createRecoveryBackup();
       setBackupSnapshot(snapshot);
+      const availableBackups = await fetchRecoveryBackups();
+      setBackups(availableBackups);
+      setSelectedBackup(snapshot.filename);
       setRecoveryReport(await checkRecoveryIntegrity());
-      setSaveNotice("Backup created.");
+      setSaveNotice("Encrypted backup created.");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setRecoveryLoading(false);
+    }
+  }
+
+  async function handleBackupRestore() {
+    if (!selectedBackup || !window.confirm(`Restore encrypted backup ${selectedBackup}?`)) {
+      return;
+    }
+    setRecoveryLoading(true);
+    setSaveNotice("");
+    setError("");
+    try {
+      const snapshot = await restoreRecoveryBackup(selectedBackup);
+      setRecoveryReport(await checkRecoveryIntegrity());
+      setBackups(await fetchRecoveryBackups());
+      setSaveNotice(
+        snapshot.safety_backup
+          ? `Backup restored. Safety backup: ${snapshot.safety_backup}`
+          : "Backup restored.",
+      );
     } catch (err) {
       setError(err.message);
     } finally {
@@ -404,6 +479,40 @@ ollama pull llama3.2`}</pre>
             ) : (
               <div className="empty-state">No permission overrides configured.</div>
             )}
+            <div className="section-heading subsection-heading">
+              <h3>Pending Approvals</h3>
+              <span>{pendingPermissions.length}</span>
+            </div>
+            {pendingPermissions.length ? (
+              <ul className="permission-list approval-list">
+                {pendingPermissions.map((request) => (
+                  <li key={request.request_id}>
+                    <span>
+                      <strong>{request.permission.replaceAll("_", " ")}</strong>
+                      <small>{request.reason}</small>
+                    </span>
+                    <div className="settings-actions">
+                      <button
+                        type="button"
+                        disabled={savingSettings}
+                        onClick={() => handlePermissionRequest(request.request_id, "allowed")}
+                      >
+                        Allow once
+                      </button>
+                      <button
+                        type="button"
+                        disabled={savingSettings}
+                        onClick={() => handlePermissionRequest(request.request_id, "denied")}
+                      >
+                        Deny
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <div className="empty-state">No actions are waiting for approval.</div>
+            )}
           </section>
 
           <section className="settings-section" aria-label="Recovery">
@@ -428,6 +537,23 @@ ollama pull llama3.2`}</pre>
                 {backupSnapshot && (
                   <p className="setting-note">Latest backup: {backupSnapshot.path}</p>
                 )}
+                {backups.length ? (
+                  <label className="recovery-backup-select">
+                    Encrypted backup
+                    <select
+                      value={selectedBackup}
+                      onChange={(event) => setSelectedBackup(event.target.value)}
+                    >
+                      {backups.map((backup) => (
+                        <option key={backup.filename} value={backup.filename}>
+                          {backup.filename}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : (
+                  <p className="setting-note">No encrypted backups found.</p>
+                )}
               </>
             ) : (
               <div className="empty-state">Recovery status unavailable.</div>
@@ -438,6 +564,13 @@ ollama pull llama3.2`}</pre>
               </button>
               <button type="button" disabled={recoveryLoading} onClick={handleBackupCreate}>
                 {recoveryLoading ? "Working" : "Backup"}
+              </button>
+              <button
+                type="button"
+                disabled={recoveryLoading || !selectedBackup}
+                onClick={handleBackupRestore}
+              >
+                {recoveryLoading ? "Working" : "Restore"}
               </button>
             </div>
           </section>

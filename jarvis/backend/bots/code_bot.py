@@ -13,14 +13,18 @@ class CodeBot(Bot):
     async def on_request(self, request: BotRequest) -> BotResponse:
         if request.action != "analyze":
             return BotResponse(ok=False, error=f"Unsupported code action: {request.action}")
-        try:
-            self.permission_manager.require_allowed("read_files")
-        except PermissionError as exc:
-            return BotResponse(ok=False, error=str(exc))
-
         raw_path = str(request.payload.get("path") or request.payload.get("text") or "").strip()
         if not raw_path:
             return BotResponse(ok=False, error="Code file path is required")
+        try:
+            self.permission_manager.require_allowed(
+                "read_files",
+                actor=request.sender,
+                reason=f"Analyze code file: {raw_path}",
+            )
+        except PermissionError as exc:
+            return self.permission_response(exc)
+
         path = Path(raw_path).expanduser()
         if not path.is_file():
             return BotResponse(ok=False, error=f"Code file does not exist: {path}")

@@ -16,13 +16,17 @@ class ResearchBot(Bot):
     async def on_request(self, request: BotRequest) -> BotResponse:
         if request.action != "search":
             return BotResponse(ok=False, error=f"Unsupported research action: {request.action}")
-        try:
-            self.permission_manager.require_allowed("access_network")
-        except PermissionError as exc:
-            return BotResponse(ok=False, error=str(exc))
         query = str(request.payload.get("text", "")).strip()
         if not query:
             return BotResponse(ok=False, error="Search query is required")
+        try:
+            self.permission_manager.require_allowed(
+                "access_network",
+                actor=request.sender,
+                reason=f"Research search: {query}",
+            )
+        except PermissionError as exc:
+            return self.permission_response(exc)
         try:
             limit = min(max(int(request.payload.get("limit", 5)), 1), 10)
         except (TypeError, ValueError):

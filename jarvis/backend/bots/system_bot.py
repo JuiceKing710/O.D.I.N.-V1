@@ -14,13 +14,17 @@ class SystemBot(Bot):
     async def on_request(self, request: BotRequest) -> BotResponse:
         if request.action != "execute":
             return BotResponse(ok=False, error=f"Unsupported system action: {request.action}")
-        try:
-            self.permission_manager.require_allowed("execute_scripts")
-        except PermissionError as exc:
-            return BotResponse(ok=False, error=str(exc))
         command = str(request.payload.get("text", "")).strip()
         if not command:
             return BotResponse(ok=False, error="Command text is required")
+        try:
+            self.permission_manager.require_allowed(
+                "execute_scripts",
+                actor=request.sender,
+                reason=f"Execute command: {command}",
+            )
+        except PermissionError as exc:
+            return self.permission_response(exc)
         try:
             argv = shlex.split(command)
         except ValueError as exc:

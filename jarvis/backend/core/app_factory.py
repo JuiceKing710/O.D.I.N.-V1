@@ -75,6 +75,7 @@ def get_recovery_manager() -> RecoveryManager:
         db_path=_default_db_path(),
         backup_dir=Path(os.environ.get("JARVIS_BACKUP_DIR", "data/backups")),
         vector_store=get_vector_store(),
+        encryption_key=os.environ.get("JARVIS_BACKUP_KEY"),
     )
 
 

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import base64
+import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -96,7 +98,12 @@ class ApiTests(unittest.TestCase):
             event_bus=self.event_bus,
         )
         self.settings = SettingsStore(base / "settings.json")
-        self.recovery = RecoveryManager(base / "jarvis.db", base / "backups", NullVectorStore())
+        self.recovery = RecoveryManager(
+            base / "jarvis.db",
+            base / "backups",
+            NullVectorStore(),
+            encryption_key="test-backup-key",
+        )
         self.voice = VoiceManager(event_bus=self.event_bus)
         app = create_app()
         app.dependency_overrides[get_core] = lambda: self.core
@@ -191,6 +198,38 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertFalse(response.json()["ok"])
         self.assertIn("denied", response.json()["error"])
+
+    def test_prompt_permission_can_be_resolved_and_retried_once(self) -> None:
+        sample = Path(self.tmp.name) / "sample.py"
+        sample.write_text("print('ready')\n", encoding="utf-8")
+        first = self.client.post(
+            "/api/v1/bot/code/exec",
+            json={"action": "analyze", "payload": {"path": str(sample)}, "sender": "api-user"},
+        )
+
+        self.assertFalse(first.json()["ok"])
+        request = first.json()["payload"]["permission_request"]
+        listed = self.client.get("/api/v1/permissions/requests")
+        self.assertEqual(listed.status_code, 200)
+        self.assertEqual(listed.json()[0]["request_id"], request["request_id"])
+
+        resolved = self.client.post(
+            f"/api/v1/permissions/requests/{request['request_id']}/resolve",
+            json={"decision": "allowed"},
+        )
+        retried = self.client.post(
+            "/api/v1/bot/code/exec",
+            json={"action": "analyze", "payload": {"path": str(sample)}, "sender": "api-user"},
+        )
+        third = self.client.post(
+            "/api/v1/bot/code/exec",
+            json={"action": "analyze", "payload": {"path": str(sample)}, "sender": "api-user"},
+        )
+
+        self.assertEqual(resolved.status_code, 200)
+        self.assertTrue(retried.json()["ok"])
+        self.assertFalse(third.json()["ok"])
+        self.assertIn("permission_request", third.json()["payload"])
 
     def test_settings_round_trip(self) -> None:
         updated = self.client.put("/api/v1/settings", json={"theme": "dark"})
@@ -418,12 +457,76 @@ class ApiTests(unittest.TestCase):
             missing,
             Path(self.tmp.name) / "backups",
             NullVectorStore(),
+            encryption_key="test-backup-key",
         )
 
         response = self.client.post("/api/v1/recovery/backups")
 
         self.assertEqual(response.status_code, 404)
         app.dependency_overrides[get_recovery_manager] = lambda: self.recovery
+
+    def test_recovery_backup_is_encrypted_and_can_restore(self) -> None:
+        self.memory.get_or_create_user("before-backup")
+        created = self.client.post("/api/v1/recovery/backups")
+
+        self.assertEqual(created.status_code, 200)
+        snapshot = created.json()
+        encrypted = Path(snapshot["path"]).read_bytes()
+        self.assertTrue(snapshot["encrypted"])
+        self.assertNotIn(b"SQLite format 3", encrypted)
+
+        self.memory.get_or_create_user("after-backup")
+        restored = self.client.post(
+            "/api/v1/recovery/restore",
+            json={"filename": snapshot["filename"]},
+        )
+
+        self.assertEqual(restored.status_code, 200)
+        with closing(sqlite3.connect(self.recovery.db_path)) as connection:
+            usernames = {
+                row[0] for row in connection.execute("SELECT username FROM users").fetchall()
+            }
+        self.assertIn("before-backup", usernames)
+        self.assertNotIn("after-backup", usernames)
+        self.assertTrue(Path(restored.json()["safety_backup"]).is_file())
+
+    def test_recovery_restore_rejects_tampered_backup(self) -> None:
+        self.memory.get_or_create_user("backup-user")
+        created = self.client.post("/api/v1/recovery/backups").json()
+        backup_path = Path(created["path"])
+        encrypted = bytearray(backup_path.read_bytes())
+        encrypted[-1] ^= 1
+        backup_path.write_bytes(encrypted)
+
+        response = self.client.post(
+            "/api/v1/recovery/restore",
+            json={"filename": created["filename"]},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("authentication failed", response.json()["detail"])
+
+    def test_recovery_restore_recreates_missing_database(self) -> None:
+        self.memory.get_or_create_user("backup-user")
+        created = self.client.post("/api/v1/recovery/backups").json()
+        self.recovery.db_path.unlink()
+
+        response = self.client.post(
+            "/api/v1/recovery/restore",
+            json={"filename": created["filename"]},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.json()["safety_backup"])
+        self.assertTrue(self.recovery.db_path.is_file())
+
+    def test_recovery_restore_rejects_path_traversal(self) -> None:
+        response = self.client.post(
+            "/api/v1/recovery/restore",
+            json={"filename": "../jarvis.db"},
+        )
+
+        self.assertEqual(response.status_code, 404)
 
 
 if __name__ == "__main__":

@@ -58,7 +58,8 @@ export JARVIS_WHISPER_COMMAND='whisper-cli {audio_path}'
 export JARVIS_TTS_COMMAND='tts-cli --text {text} --output {output_path}'
 ```
 
-Bot chat commands use `/<bot> <action> [text]`. Relevant permissions must be set to `allowed`:
+Bot chat commands use `/<bot> <action> [text]`. Permissions set to `prompt` create a pending
+one-time approval in Settings; permissions set to `allowed` run without prompting:
 
 ```text
 /code analyze path/to/file.py
@@ -74,6 +75,17 @@ The backend defaults to a SQLite database at `data/jarvis.db`. Override it with:
 ```bash
 export JARVIS_DB_PATH=/path/to/jarvis.db
 ```
+
+Encrypted SQLite backups and restore require an external secret. The key is never written into a
+backup or settings file:
+
+```bash
+export JARVIS_BACKUP_KEY='use-a-long-random-secret'
+export JARVIS_BACKUP_DIR=data/backups
+```
+
+Backups use AES-GCM authenticated encryption. Restore validates the encrypted file and SQLite
+integrity, then creates an encrypted safety backup of the current database before replacement.
 
 Local frontend origins are allowed by default for development and preview. Override them with:
 

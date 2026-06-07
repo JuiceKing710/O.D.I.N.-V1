@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from jarvis.backend.utils.audit_logging import AuditLogger
-from jarvis.backend.utils.permissions import PermissionManager
+from jarvis.backend.utils.permissions import PermissionApprovalRequired, PermissionManager
 
 
 @dataclass(slots=True)
@@ -41,3 +41,9 @@ class Bot(ABC):
     def get_persona(self) -> str:
         return self.description
 
+    @staticmethod
+    def permission_response(exc: PermissionError) -> BotResponse:
+        payload = {}
+        if isinstance(exc, PermissionApprovalRequired):
+            payload["permission_request"] = exc.request.to_api()
+        return BotResponse(ok=False, payload=payload, error=str(exc))

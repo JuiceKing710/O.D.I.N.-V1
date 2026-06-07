@@ -11,16 +11,24 @@ class FileBot(Bot):
 
     async def on_request(self, request: BotRequest) -> BotResponse:
         if request.action == "read":
+            raw_path = str(request.payload.get("text", "")).strip()
+            if not raw_path:
+                return BotResponse(ok=False, error="File path is required")
             try:
-                self.permission_manager.require_allowed("read_files")
-                path = Path(str(request.payload.get("text", ""))).expanduser()
+                self.permission_manager.require_allowed(
+                    "read_files",
+                    actor=request.sender,
+                    reason=f"Read file: {raw_path}",
+                )
+                path = Path(raw_path).expanduser()
                 if not path.is_file():
                     return BotResponse(ok=False, error="File does not exist")
                 return BotResponse(ok=True, payload={"text": path.read_text(encoding="utf-8")[:8000]})
-            except (OSError, UnicodeDecodeError, PermissionError) as exc:
+            except PermissionError as exc:
+                return self.permission_response(exc)
+            except (OSError, UnicodeDecodeError) as exc:
                 return BotResponse(ok=False, error=str(exc))
         return BotResponse(ok=False, error=f"Unsupported file action: {request.action}")
 
     def capabilities(self) -> list[str]:
         return ["read"]
-

@@ -931,6 +931,36 @@ textarea {
   text-transform: capitalize;
 }
 
+.subsection-heading {
+  margin-top: 18px;
+}
+
+.approval-list li,
+.approval-list span {
+  align-items: flex-start;
+}
+
+.approval-list span,
+.recovery-backup-select {
+  display: grid;
+  gap: 5px;
+}
+
+.approval-list small,
+.recovery-backup-select {
+  color: #8ea0b6;
+  text-transform: none;
+}
+
+.recovery-backup-select select {
+  max-width: 100%;
+  color: #d8e1ec;
+  background: #171c24;
+  border: 1px solid #2a3340;
+  border-radius: 8px;
+  padding: 7px 9px;
+}
+
 .command-help {
   max-width: 32rem;
   margin: 8px 0 0;

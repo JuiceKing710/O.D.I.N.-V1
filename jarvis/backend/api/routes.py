@@ -24,10 +24,14 @@ from jarvis.backend.api.models import (
     MemoryStatusResponse,
     ModelLoadRequest,
     ModelsResponse,
+    PermissionRequestResponse,
+    PermissionResolveRequest,
     SettingsResponse,
     SettingsUpdateRequest,
     ReflectionRequest,
     ReflectionResponse,
+    RestoreRequest,
+    RestoreResponse,
     TaskCreateRequest,
     TaskResponse,
     TaskUpdateRequest,
@@ -53,7 +57,7 @@ from jarvis.backend.core.recovery_manager import RecoveryManager
 from jarvis.backend.core.settings_store import SettingsStore
 from jarvis.backend.core.voice_manager import VoiceManager, VoiceState
 from jarvis.backend.utils.reflection import ReflectionEngine
-from jarvis.backend.utils.permissions import PermissionManager
+from jarvis.backend.utils.permissions import PermissionDecision, PermissionManager
 
 router = APIRouter(prefix="/api/v1")
 
@@ -264,6 +268,41 @@ def update_settings(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.get("/permissions/requests", response_model=list[PermissionRequestResponse])
+def list_permission_requests(
+    permission_manager: PermissionManager = Depends(get_permission_manager),
+) -> list[PermissionRequestResponse]:
+    return [
+        PermissionRequestResponse(**request.to_api())
+        for request in permission_manager.pending_requests()
+    ]
+
+
+@router.post(
+    "/permissions/requests/{request_id}/resolve",
+    response_model=PermissionRequestResponse,
+)
+def resolve_permission_request(
+    request_id: str,
+    request: PermissionResolveRequest,
+    permission_manager: PermissionManager = Depends(get_permission_manager),
+    event_bus: EventBus = Depends(get_event_bus),
+) -> PermissionRequestResponse:
+    try:
+        resolved = permission_manager.resolve_request(
+            request_id,
+            PermissionDecision(request.decision),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    response = PermissionRequestResponse(**resolved.to_api())
+    event_bus.publish(
+        "permission.resolved",
+        {"request": response.model_dump(mode="json"), "decision": request.decision},
+    )
+    return response
+
+
 @router.get("/models", response_model=ModelsResponse)
 async def list_models(core: JarvisCore = Depends(get_core)) -> ModelsResponse:
     models = await core.lm_provider.list_models()
@@ -415,8 +454,48 @@ def create_backup(
         snapshot = recovery_manager.create_sqlite_backup()
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     return BackupResponse(
+        filename=snapshot.path.name,
         path=str(snapshot.path),
+        created_at=snapshot.created_at,
+        encrypted=snapshot.encrypted,
+    )
+
+
+@router.get("/recovery/backups", response_model=list[BackupResponse])
+def list_backups(
+    recovery_manager: RecoveryManager = Depends(get_recovery_manager),
+) -> list[BackupResponse]:
+    return [
+        BackupResponse(
+            filename=snapshot.path.name,
+            path=str(snapshot.path),
+            created_at=snapshot.created_at,
+            encrypted=snapshot.encrypted,
+        )
+        for snapshot in recovery_manager.list_backups()
+    ]
+
+
+@router.post("/recovery/restore", response_model=RestoreResponse)
+def restore_backup(
+    request: RestoreRequest,
+    recovery_manager: RecoveryManager = Depends(get_recovery_manager),
+) -> RestoreResponse:
+    try:
+        snapshot = recovery_manager.restore_sqlite_backup(request.filename)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return RestoreResponse(
+        path=str(snapshot.path),
+        restored_from=str(snapshot.restored_from),
+        safety_backup=str(snapshot.safety_backup) if snapshot.safety_backup else None,
         created_at=snapshot.created_at,
         encrypted=snapshot.encrypted,
     )
