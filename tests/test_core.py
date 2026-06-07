@@ -11,6 +11,8 @@ from unittest.mock import patch
 
 from jarvis.backend.bots.base import Bot, BotRequest, BotResponse
 from jarvis.backend.bots.code_bot import CodeBot
+from jarvis.backend.bots.research_bot import ResearchBot
+from jarvis.backend.bots.system_bot import SystemBot
 from jarvis.backend.core.app_factory import _ollama_timeout_seconds
 from jarvis.backend.core.bot_manager import BotManager, BotMessage
 from jarvis.backend.core.jarvis_core import JarvisCore
@@ -63,8 +65,10 @@ class SlowBot(Bot):
 
 
 class MockHttpResponse:
-    def __init__(self, body: dict[str, Any]) -> None:
-        self.body = json.dumps(body).encode("utf-8")
+    def __init__(self, body: dict[str, Any] | str) -> None:
+        self.body = (
+            body.encode("utf-8") if isinstance(body, str) else json.dumps(body).encode("utf-8")
+        )
 
     def __enter__(self) -> "MockHttpResponse":
         return self
@@ -74,6 +78,14 @@ class MockHttpResponse:
 
     def read(self) -> bytes:
         return self.body
+
+
+class FakeSpeechToTextAdapter:
+    name = "fake-stt"
+    configured = True
+
+    def transcribe(self, audio_path: Path) -> str:
+        return audio_path.read_bytes().decode("utf-8")
 
 
 class CoreTests(unittest.TestCase):
@@ -113,9 +125,68 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(len(matches), 2)
 
     def test_bot_command_dispatches_registered_bot(self) -> None:
-        result = asyncio.run(self.core.handle_message("/code analyze main.py", "tester"))
+        path = Path(self.tmp.name) / "sample.py"
+        path.write_text("def ready():\n    return True\n", encoding="utf-8")
+        self.permissions.update_decisions({"read_files": "allowed"})
+
+        result = asyncio.run(self.core.handle_message(f"/code analyze {path}", "tester"))
+
         self.assertEqual(result["bot"], "code")
-        self.assertIn("Code analysis request accepted", result["reply"])
+        self.assertIn("Analyzed", result["reply"])
+
+    def test_code_bot_returns_real_file_analysis(self) -> None:
+        path = Path(self.tmp.name) / "sample.py"
+        path.write_text("class Ready:\n    pass\n\n# TODO ship\n", encoding="utf-8")
+        self.permissions.update_decisions({"read_files": "allowed"})
+        bot = CodeBot(self.permissions, self.audit)
+
+        response = asyncio.run(
+            bot.on_request(
+                BotRequest(sender="test", action="analyze", payload={"path": str(path)}, correlation_id="1")
+            )
+        )
+
+        self.assertTrue(response.ok)
+        self.assertEqual(response.payload["analysis"]["class_count"], 1)
+        self.assertEqual(response.payload["analysis"]["todo_count"], 1)
+
+    def test_system_bot_executes_approved_command(self) -> None:
+        self.permissions.update_decisions({"execute_scripts": "allowed"})
+        bot = SystemBot(self.permissions, self.audit)
+
+        response = asyncio.run(
+            bot.on_request(
+                BotRequest(
+                    sender="test",
+                    action="execute",
+                    payload={"text": "printf hello"},
+                    correlation_id="1",
+                )
+            )
+        )
+
+        self.assertTrue(response.ok)
+        self.assertEqual(response.payload["stdout"], "hello")
+
+    def test_research_bot_returns_network_results(self) -> None:
+        self.permissions.update_decisions({"access_network": "allowed"})
+        bot = ResearchBot(self.permissions, self.audit)
+        body = '<a class="result__a" href="https://example.com">Example result</a>'
+
+        with patch("urllib.request.urlopen", return_value=MockHttpResponse(body)):
+            response = asyncio.run(
+                bot.on_request(
+                    BotRequest(
+                        sender="test",
+                        action="search",
+                        payload={"text": "example"},
+                        correlation_id="1",
+                    )
+                )
+            )
+
+        self.assertTrue(response.ok)
+        self.assertEqual(response.payload["results"][0]["url"], "https://example.com")
 
     def test_bot_manager_returns_none_for_unknown_bot(self) -> None:
         response = asyncio.run(
@@ -210,6 +281,16 @@ class CoreTests(unittest.TestCase):
 
         self.assertEqual(summary.reflection_id, summaries[0].reflection_id)
         self.assertIn("I heard", summaries[0].summary)
+        context = self.memory.query_context(user.user_id, "Summarize", limit=5)
+        self.assertTrue(any("[conversation:" in item for item in context))
+
+    def test_voice_transcribes_uploaded_audio(self) -> None:
+        voice = VoiceManager(stt_adapter=FakeSpeechToTextAdapter())
+
+        transcript = voice.transcribe_audio(b"hello from audio", ".webm")
+
+        self.assertEqual(transcript, "hello from audio")
+        self.assertEqual(voice.state, VoiceState.IDLE)
 
     def test_ollama_provider_parses_models_and_selects_first(self) -> None:
         provider = OllamaProvider()

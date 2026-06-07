@@ -38,6 +38,10 @@ class MemoryQueryResponse(BaseModel):
     results: list[MemoryItem]
 
 
+class MemoryStatusResponse(BaseModel):
+    vector: dict[str, Any]
+
+
 class ConversationSummaryResponse(BaseModel):
     convo_id: int
     user_id: int
@@ -148,7 +152,9 @@ class VoiceStatusResponse(BaseModel):
 
 
 class VoiceTranscribeRequest(BaseModel):
-    audio_path: str = Field(min_length=1)
+    audio_path: str | None = None
+    audio_base64: str | None = Field(default=None, max_length=20_000_000)
+    audio_suffix: str = ".webm"
 
 
 class VoiceTranscribeResponse(BaseModel):
@@ -178,3 +184,16 @@ class BackupResponse(BaseModel):
     path: str
     created_at: datetime
     encrypted: bool
+
+
+class ReflectionRequest(BaseModel):
+    username: str = Field(default="local-user", min_length=1)
+
+
+class ReflectionResponse(BaseModel):
+    reflection_id: int
+    convo_id: int
+    summary: str
+    topics: str | None = None
+    sentiment: str | None = None
+    created_at: datetime

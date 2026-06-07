@@ -33,6 +33,12 @@ class ReflectionEngine:
                 metadata={"task": "reflection"},
             )
         record = self.memory.save_reflection_summary(conversation.convo_id, summary)
+        self.memory.save_document(
+            user_id,
+            f"reflection:{record.reflection_id}",
+            f"conversation:{conversation.convo_id}",
+            record.summary,
+        )
         return ReflectionSummary(
             conversation_id=conversation.convo_id,
             reflection_id=record.reflection_id,

@@ -44,6 +44,16 @@ export function fetchVoiceStatus() {
   return request("/api/v1/voice/status");
 }
 
+export function transcribeVoiceAudio({ audioBase64, audioSuffix = ".webm" }) {
+  return request("/api/v1/voice/transcribe", {
+    method: "POST",
+    body: JSON.stringify({
+      audio_base64: audioBase64,
+      audio_suffix: audioSuffix,
+    }),
+  });
+}
+
 export function synthesizeVoice({ text, voiceName = null }) {
   return request("/api/v1/voice/synthesize", {
     method: "POST",
@@ -69,6 +79,10 @@ export function checkRecoveryIntegrity() {
   return request("/api/v1/recovery/integrity");
 }
 
+export function fetchMemoryStatus() {
+  return request("/api/v1/memory/status");
+}
+
 export function createRecoveryBackup() {
   return request("/api/v1/recovery/backups", {
     method: "POST",
@@ -83,6 +97,19 @@ export function fetchConversationMessages(conversationId, username = "local-user
   return request(
     `/api/v1/conversations/${conversationId}/messages?username=${encodeURIComponent(username)}`,
   );
+}
+
+export function fetchReflections(conversationId, username = "local-user") {
+  return request(
+    `/api/v1/conversations/${conversationId}/reflections?username=${encodeURIComponent(username)}`,
+  );
+}
+
+export function createReflection(conversationId, username = "local-user") {
+  return request(`/api/v1/conversations/${conversationId}/reflections`, {
+    method: "POST",
+    body: JSON.stringify({ username }),
+  });
 }
 
 export function fetchTasks(username = "local-user") {

@@ -54,6 +54,10 @@ export function AppStateProvider({ children }) {
     });
   }, [refreshSettings]);
 
+  useEffect(() => {
+    document.documentElement.dataset.theme = settings?.theme || "system";
+  }, [settings?.theme]);
+
   const value = useMemo(
     () => ({
       conversationId,

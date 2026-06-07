@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import tempfile
 import unittest
 from pathlib import Path
@@ -58,6 +59,14 @@ class StatusLMProvider(EchoLMProvider):
             available=True,
             selected_model="llama3.2:latest",
         )
+
+
+class FakeSpeechToTextAdapter:
+    name = "fake-stt"
+    configured = True
+
+    def transcribe(self, audio_path: Path) -> str:
+        return audio_path.read_bytes().decode("utf-8")
 
 
 class ApiTests(unittest.TestCase):
@@ -296,6 +305,29 @@ class ApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 404)
 
+    def test_reflection_endpoint_creates_searchable_summary(self) -> None:
+        created = self.client.post(
+            "/api/v1/chat",
+            json={"message": "remember the copper key", "username": "reflect-user"},
+        )
+
+        response = self.client.post(
+            f"/api/v1/conversations/{created.json()['conversation_id']}/reflections",
+            json={"username": "reflect-user"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("I heard", response.json()["summary"])
+        user = self.memory.get_or_create_user("reflect-user")
+        documents = self.memory.query_documents(user.user_id, "Summarize", 5)
+        self.assertEqual(documents[0].source, f"conversation:{created.json()['conversation_id']}")
+
+    def test_memory_status_reports_vector_provider(self) -> None:
+        response = self.client.get("/api/v1/memory/status")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["vector"]["provider"], "null")
+
     def test_model_load_endpoint_updates_loaded_model(self) -> None:
         response = self.client.post("/api/v1/models/load", json={"model_name": "echo-alt"})
 
@@ -347,6 +379,20 @@ class ApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 503)
         self.assertIn("Text-to-speech adapter is not configured", response.json()["detail"])
+
+    def test_voice_transcribes_uploaded_audio(self) -> None:
+        self.voice.stt_adapter = FakeSpeechToTextAdapter()
+
+        response = self.client.post(
+            "/api/v1/voice/transcribe",
+            json={
+                "audio_base64": base64.b64encode(b"uploaded transcript").decode("ascii"),
+                "audio_suffix": ".webm",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["transcript"], "uploaded transcript")
 
     def test_voice_state_update_emits_websocket_event(self) -> None:
         with self.client.websocket_connect("/api/v1/events") as websocket:

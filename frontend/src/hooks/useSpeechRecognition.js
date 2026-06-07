@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 
-export function useSpeechRecognition({ onResult, onStart, onEnd } = {}) {
+export function useSpeechRecognition({ continuous = false, onResult, onStart, onEnd } = {}) {
   const [listening, setListening] = useState(false);
   const [transcript, setTranscript] = useState("");
   const [error, setError] = useState("");
@@ -29,7 +29,7 @@ export function useSpeechRecognition({ onResult, onStart, onEnd } = {}) {
     lastFinalTranscriptRef.current = "";
     const recognition = new Recognition();
     recognition.lang = "en-US";
-    recognition.continuous = false;
+    recognition.continuous = continuous;
     recognition.interimResults = true;
 
     recognition.onstart = () => {

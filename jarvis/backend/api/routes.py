@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import binascii
 from dataclasses import asdict
 from pathlib import Path
 
@@ -19,10 +21,13 @@ from jarvis.backend.api.models import (
     MemoryItem,
     MemoryQueryRequest,
     MemoryQueryResponse,
+    MemoryStatusResponse,
     ModelLoadRequest,
     ModelsResponse,
     SettingsResponse,
     SettingsUpdateRequest,
+    ReflectionRequest,
+    ReflectionResponse,
     TaskCreateRequest,
     TaskResponse,
     TaskUpdateRequest,
@@ -47,6 +52,7 @@ from jarvis.backend.core.jarvis_core import JarvisCore
 from jarvis.backend.core.recovery_manager import RecoveryManager
 from jarvis.backend.core.settings_store import SettingsStore
 from jarvis.backend.core.voice_manager import VoiceManager, VoiceState
+from jarvis.backend.utils.reflection import ReflectionEngine
 from jarvis.backend.utils.permissions import PermissionManager
 
 router = APIRouter(prefix="/api/v1")
@@ -91,6 +97,11 @@ def query_memory(
     return MemoryQueryResponse(results=[MemoryItem(**row.to_api()) for row in rows])
 
 
+@router.get("/memory/status", response_model=MemoryStatusResponse)
+def memory_status(core: JarvisCore = Depends(get_core)) -> MemoryStatusResponse:
+    return MemoryStatusResponse(vector=core.memory.vector_store.health())
+
+
 @router.get("/conversations", response_model=list[ConversationSummaryResponse])
 def list_conversations(
     username: str = "local-user",
@@ -118,6 +129,49 @@ def list_conversation_messages(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     rows = core.memory.list_conversation_messages(conversation_id)
     return [ConversationMessageResponse(**row.to_api()) for row in rows]
+
+
+@router.get(
+    "/conversations/{conversation_id}/reflections",
+    response_model=list[ReflectionResponse],
+)
+def list_reflections(
+    conversation_id: int,
+    username: str = "local-user",
+    core: JarvisCore = Depends(get_core),
+) -> list[ReflectionResponse]:
+    user = core.memory.get_or_create_user(username)
+    try:
+        core.memory.get_conversation(conversation_id, user.user_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return [
+        ReflectionResponse(**reflection.to_api())
+        for reflection in core.memory.list_reflection_summaries(conversation_id)
+    ]
+
+
+@router.post(
+    "/conversations/{conversation_id}/reflections",
+    response_model=ReflectionResponse,
+)
+async def create_reflection(
+    conversation_id: int,
+    request: ReflectionRequest,
+    core: JarvisCore = Depends(get_core),
+) -> ReflectionResponse:
+    user = core.memory.get_or_create_user(request.username)
+    try:
+        await ReflectionEngine(core.memory, core.lm_provider).summarize_conversation(
+            user.user_id,
+            conversation_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=f"Reflection provider unavailable: {exc}") from exc
+    record = core.memory.list_reflection_summaries(conversation_id)[0]
+    return ReflectionResponse(**record.to_api())
 
 
 @router.post("/bot/{bot_name}/exec", response_model=BotExecResponse)
@@ -286,7 +340,18 @@ def transcribe_voice(
     voice_manager: VoiceManager = Depends(get_voice_manager),
 ) -> VoiceTranscribeResponse:
     try:
-        transcript = voice_manager.transcribe(request.audio_path)
+        if request.audio_base64:
+            try:
+                audio = base64.b64decode(request.audio_base64, validate=True)
+            except (binascii.Error, ValueError) as exc:
+                raise HTTPException(status_code=400, detail="Invalid base64 audio data") from exc
+            if len(audio) > 15_000_000:
+                raise HTTPException(status_code=413, detail="Audio upload exceeds 15 MB")
+            transcript = voice_manager.transcribe_audio(audio, request.audio_suffix)
+        elif request.audio_path:
+            transcript = voice_manager.transcribe(request.audio_path)
+        else:
+            raise HTTPException(status_code=400, detail="audio_base64 or audio_path is required")
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     return VoiceTranscribeResponse(

@@ -16,7 +16,8 @@ This initial build includes:
 - Electron desktop wrapper around the built React app.
 - Unit and API tests for core message handling, persistence, bot dispatch, permissions, CORS, tasks, and settings.
 
-Heavy runtime integrations such as Whisper, Piper/Kokoro, and ChromaDB are represented by adapters and interfaces so they can be implemented safely behind stable contracts. Ollama is the default local LLM provider.
+Ollama is the default local LLM provider. ChromaDB, command-based Whisper transcription,
+and command-based TTS can be enabled through environment configuration.
 
 ## Backend
 
@@ -41,6 +42,32 @@ export OLLAMA_BASE_URL=http://127.0.0.1:11434
 export OLLAMA_MODEL=llama3.2
 export OLLAMA_TIMEOUT_SECONDS=120
 ```
+
+Enable persistent vector memory with:
+
+```bash
+pip install -e ".[vector]"
+export JARVIS_CHROMA_PATH=data/chroma
+```
+
+Enable command-based speech-to-text and text-to-speech adapters with commands that write their
+transcript to stdout or create the requested output file:
+
+```bash
+export JARVIS_WHISPER_COMMAND='whisper-cli {audio_path}'
+export JARVIS_TTS_COMMAND='tts-cli --text {text} --output {output_path}'
+```
+
+Bot chat commands use `/<bot> <action> [text]`. Relevant permissions must be set to `allowed`:
+
+```text
+/code analyze path/to/file.py
+/research search local-first assistants
+/system execute date
+```
+
+The research bot performs a bounded DuckDuckGo HTML lookup, the code bot analyzes real local files,
+and the system bot executes a parsed command without shell expansion.
 
 The backend defaults to a SQLite database at `data/jarvis.db`. Override it with:
 

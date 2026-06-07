@@ -2,10 +2,13 @@ import React, { useEffect, useRef, useState } from "react";
 import { useSpeechRecognition } from "../hooks/useSpeechRecognition.js";
 import { useSpeechSynthesis } from "../hooks/useSpeechSynthesis.js";
 import {
+  createReflection,
   fetchConversationMessages,
   fetchConversations,
   fetchModels,
+  fetchReflections,
   sendChatMessage,
+  transcribeVoiceAudio,
 } from "../ipc/apiClient.js";
 import { useAppState } from "../state/appContext.jsx";
 import { useChatStore } from "../state/chatStore.js";
@@ -28,10 +31,18 @@ export function ChatView({ onOpenCoreFocus }) {
     loading: true,
     provider: null,
   });
+  const [reflections, setReflections] = useState([]);
+  const [reflectionLoading, setReflectionLoading] = useState(false);
+  const [backendRecording, setBackendRecording] = useState(false);
   const inputRef = useRef(null);
+  const mediaRecorderRef = useRef(null);
+  const mediaStreamRef = useRef(null);
   const messageEndRef = useRef(null);
   const messageListRef = useRef(null);
-  const { conversationId, currentUser, setConversationId, startNewConversation } = useAppState();
+  const { conversationId, currentUser, settings, setConversationId, startNewConversation } =
+    useAppState();
+  const voiceMode = settings?.voice_mode || "push_to_talk";
+  const voiceDisabled = voiceMode === "disabled";
   const messages = useChatStore((state) => state.messages);
   const addMessage = useChatStore((state) => state.addMessage);
   const clearMessages = useChatStore((state) => state.clearMessages);
@@ -46,6 +57,7 @@ export function ChatView({ onOpenCoreFocus }) {
     },
   });
   const recognition = useSpeechRecognition({
+    continuous: voiceMode === "always_listening",
     onStart: () => setVoiceState("listening"),
     onEnd: () => setVoiceState("idle"),
     onResult: (text) => {
@@ -105,6 +117,22 @@ export function ChatView({ onOpenCoreFocus }) {
   useEffect(() => {
     refreshConversations();
   }, [currentUser.username]);
+
+  useEffect(() => {
+    if (voiceDisabled) {
+      setVoiceEnabled(false);
+      stopSpeech();
+      recognition.stop();
+    } else {
+      setVoiceEnabled(true);
+    }
+  }, [voiceDisabled]);
+
+  useEffect(() => {
+    if (voiceMode === "always_listening" && recognition.available && !recognition.listening) {
+      recognition.start();
+    }
+  }, [voiceMode]);
 
   useEffect(() => {
     if (isPinnedToLatest) {
@@ -173,6 +201,7 @@ export function ChatView({ onOpenCoreFocus }) {
     try {
       const response = await fetchConversationMessages(nextConversationId, currentUser.username);
       setConversationId(nextConversationId);
+      setReflections(await fetchReflections(nextConversationId, currentUser.username));
       setMessages(
         response.map((message) => ({
           id: `message-${message.msg_id}`,
@@ -190,6 +219,81 @@ export function ChatView({ onOpenCoreFocus }) {
       });
     } catch (error) {
       setConversationError(error.message);
+    }
+  }
+
+  async function reflectOnConversation() {
+    if (!conversationId || reflectionLoading) {
+      return;
+    }
+    setReflectionLoading(true);
+    setConversationError("");
+    try {
+      await createReflection(conversationId, currentUser.username);
+      setReflections(await fetchReflections(conversationId, currentUser.username));
+    } catch (error) {
+      setConversationError(error.message);
+    } finally {
+      setReflectionLoading(false);
+    }
+  }
+
+  async function blobToBase64(blob) {
+    const buffer = await blob.arrayBuffer();
+    const bytes = new Uint8Array(buffer);
+    let binary = "";
+    for (const byte of bytes) {
+      binary += String.fromCharCode(byte);
+    }
+    return btoa(binary);
+  }
+
+  async function toggleBackendRecording() {
+    if (backendRecording) {
+      mediaRecorderRef.current?.stop();
+      return;
+    }
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+      setVoiceNotice("Browser audio recording is unavailable.");
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const chunks = [];
+      const recorder = new MediaRecorder(stream);
+      mediaStreamRef.current = stream;
+      mediaRecorderRef.current = recorder;
+      recorder.ondataavailable = (event) => {
+        if (event.data.size) {
+          chunks.push(event.data);
+        }
+      };
+      recorder.onstop = async () => {
+        setBackendRecording(false);
+        stream.getTracks().forEach((track) => track.stop());
+        setVoiceState("thinking");
+        try {
+          const blob = new Blob(chunks, { type: recorder.mimeType });
+          if (blob.size > 15_000_000) {
+            throw new Error("Backend microphone recording exceeds the 15 MB limit.");
+          }
+          const response = await transcribeVoiceAudio({
+            audioBase64: await blobToBase64(blob),
+            audioSuffix: recorder.mimeType.includes("webm") ? ".webm" : ".wav",
+          });
+          setInput(response.transcript);
+          await sendMessage(response.transcript);
+        } catch (error) {
+          setVoiceNotice(error.message);
+          setVoiceState("idle");
+        }
+      };
+      recorder.start();
+      setBackendRecording(true);
+      setVoiceState("listening");
+      setVoiceNotice("");
+    } catch (error) {
+      setVoiceNotice(error.message);
     }
   }
 
@@ -251,7 +355,7 @@ export function ChatView({ onOpenCoreFocus }) {
             Conversation {conversationId ? `#${conversationId}` : "New"}
           </p>
           <p>
-            Voice {speech.available ? "ready" : "unavailable"}{" "}
+            Voice {voiceDisabled ? "disabled" : speech.available ? "ready" : "unavailable"}{" "}
             {speech.voiceName ? `with ${speech.voiceName}` : ""}
           </p>
           <div className="runtime-status" aria-label="Runtime status">
@@ -279,6 +383,7 @@ export function ChatView({ onOpenCoreFocus }) {
                 stopSpeech();
               }
             }}
+            disabled={voiceDisabled}
           >
             Voice
           </button>
@@ -292,9 +397,17 @@ export function ChatView({ onOpenCoreFocus }) {
               speech.warmUp();
               recognition.toggle();
             }}
-            disabled={!recognition.available}
+            disabled={voiceDisabled || !recognition.available}
           >
             {recognition.listening ? "Listening" : "Mic"}
+          </button>
+          <button
+            className={backendRecording ? "toggle active" : "toggle"}
+            type="button"
+            onClick={toggleBackendRecording}
+            disabled={voiceDisabled}
+          >
+            {backendRecording ? "Transcribe" : "Backend Mic"}
           </button>
           <button
             type="button"
@@ -306,7 +419,7 @@ export function ChatView({ onOpenCoreFocus }) {
                 content: "Jarvis voice test. If you can hear this, speech output is working.",
               });
             }}
-            disabled={!speech.available}
+            disabled={voiceDisabled || !speech.available}
           >
             Test Voice
           </button>
@@ -331,9 +444,18 @@ export function ChatView({ onOpenCoreFocus }) {
       <section className="conversation-history" aria-label="Conversation history">
         <div className="conversation-history-heading">
           <h2>History</h2>
-          <button type="button" onClick={refreshConversations} disabled={conversationsLoading}>
-            Refresh
-          </button>
+          <div className="history-actions">
+            <button
+              type="button"
+              onClick={reflectOnConversation}
+              disabled={!conversationId || reflectionLoading}
+            >
+              {reflectionLoading ? "Reflecting" : "Reflect"}
+            </button>
+            <button type="button" onClick={refreshConversations} disabled={conversationsLoading}>
+              Refresh
+            </button>
+          </div>
         </div>
         {conversations.length ? (
           <div className="conversation-list">
@@ -356,6 +478,12 @@ export function ChatView({ onOpenCoreFocus }) {
           <div className="empty-state">
             {conversationsLoading ? "Loading conversations..." : "No conversations yet."}
           </div>
+        )}
+        {reflections.length > 0 && (
+          <details className="reflection-summary">
+            <summary>{reflections.length} reflection(s)</summary>
+            <p>{reflections[0].summary}</p>
+          </details>
         )}
       </section>
       <div className="message-stage">
@@ -380,7 +508,7 @@ export function ChatView({ onOpenCoreFocus }) {
                     onClick={() =>
                       speakingMessageId === message.id ? stopSpeech() : speakMessage(message)
                     }
-                    disabled={!speech.available}
+                    disabled={voiceDisabled || !speech.available}
                   >
                     {speakingMessageId === message.id && speech.speaking ? "Stop" : "Speak"}
                   </button>

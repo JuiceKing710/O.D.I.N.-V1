@@ -106,6 +106,25 @@ class ReflectionRecord:
         }
 
 
+@dataclass(slots=True)
+class DocumentRecord:
+    document_id: str
+    user_id: int
+    source: str
+    content: str
+    embedding_id: str | None
+    created_at: datetime
+
+    def to_api(self) -> dict[str, Any]:
+        return {
+            "document_id": self.document_id,
+            "user_id": self.user_id,
+            "source": self.source,
+            "content": self.content,
+            "created_at": self.created_at,
+        }
+
+
 class TTLCache:
     def __init__(self, ttl_seconds: int = 300, max_size: int = 256) -> None:
         self.ttl_seconds = ttl_seconds
@@ -277,6 +296,88 @@ class MemoryManager:
         merged = self._merge_messages(vector_records, records, limit)
         self.cache.set(cache_key, merged)
         return merged
+
+    def save_document(
+        self,
+        user_id: int,
+        document_id: str,
+        source: str,
+        content: str,
+    ) -> DocumentRecord:
+        cleaned_id = document_id.strip()
+        cleaned_content = content.strip()
+        if not cleaned_id or not cleaned_content:
+            raise ValueError("document_id and content are required")
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO documents(document_id, user_id, source, content)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(document_id) DO UPDATE SET
+                  user_id = excluded.user_id,
+                  source = excluded.source,
+                  content = excluded.content
+                """,
+                (cleaned_id, user_id, source.strip() or "unknown", cleaned_content),
+            )
+            row = conn.execute(
+                """
+                SELECT document_id, user_id, source, content, embedding_id, created_at
+                FROM documents
+                WHERE document_id = ?
+                """,
+                (cleaned_id,),
+            ).fetchone()
+            document = self._document_from_row(row)
+            embedding_id = self._safe_upsert_document(document)
+            if embedding_id is not None:
+                conn.execute(
+                    "UPDATE documents SET embedding_id = ? WHERE document_id = ?",
+                    (embedding_id, cleaned_id),
+                )
+                row = conn.execute(
+                    """
+                    SELECT document_id, user_id, source, content, embedding_id, created_at
+                    FROM documents
+                    WHERE document_id = ?
+                    """,
+                    (cleaned_id,),
+                ).fetchone()
+        self.cache.clear()
+        return self._document_from_row(row)
+
+    def query_documents(self, user_id: int, query: str, limit: int = 5) -> list[DocumentRecord]:
+        vector_records = self._query_vector_documents(user_id, query, limit)
+        if len(vector_records) >= limit:
+            return vector_records
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT document_id, user_id, source, content, embedding_id, created_at
+                FROM documents
+                WHERE user_id = ? AND content LIKE ?
+                ORDER BY created_at DESC, document_id DESC
+                LIMIT ?
+                """,
+                (user_id, f"%{query.strip()}%", limit),
+            ).fetchall()
+        merged = []
+        seen = set()
+        for document in [*vector_records, *(self._document_from_row(row) for row in rows)]:
+            if document.document_id in seen:
+                continue
+            merged.append(document)
+            seen.add(document.document_id)
+            if len(merged) >= limit:
+                break
+        return merged
+
+    def query_context(self, user_id: int, query: str, limit: int = 5) -> list[str]:
+        messages = self.query_messages(user_id, query, limit)
+        documents = self.query_documents(user_id, query, limit)
+        context = [f"[{document.source}] {document.content}" for document in documents]
+        context.extend(message.content for message in messages)
+        return context[:limit]
 
     def create_task(self, user_id: int, name: str, description: str | None = None) -> TaskRecord:
         if not name.strip():
@@ -474,6 +575,16 @@ class MemoryManager:
                   FOREIGN KEY(convo_id) REFERENCES conversations(convo_id)
                 );
 
+                CREATE TABLE IF NOT EXISTS documents (
+                  document_id TEXT PRIMARY KEY,
+                  user_id INTEGER NOT NULL,
+                  source TEXT NOT NULL,
+                  content TEXT NOT NULL,
+                  embedding_id TEXT,
+                  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                  FOREIGN KEY(user_id) REFERENCES users(user_id)
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_conversations_user_id
                   ON conversations(user_id);
                 CREATE INDEX IF NOT EXISTS idx_messages_convo_id_created_at
@@ -482,6 +593,8 @@ class MemoryManager:
                   ON tasks(user_id, status);
                 CREATE INDEX IF NOT EXISTS idx_reflection_summaries_convo_id
                   ON reflection_summaries(convo_id);
+                CREATE INDEX IF NOT EXISTS idx_documents_user_id
+                  ON documents(user_id);
                 """
             )
 
@@ -518,6 +631,38 @@ class MemoryManager:
             ).fetchall()
         records_by_id = {row["msg_id"]: self._message_from_row(row) for row in rows}
         return [records_by_id[msg_id] for msg_id in message_ids if msg_id in records_by_id]
+
+    def _query_vector_documents(
+        self, user_id: int, query: str, limit: int
+    ) -> list[DocumentRecord]:
+        if not self.vector_store.enabled or not query.strip():
+            return []
+        try:
+            vector_rows = self.vector_store.query("documents", query, limit)
+        except Exception:
+            return []
+        document_ids = [
+            str(row.metadata.get("document_id") or row.record_id.removeprefix("document:"))
+            for row in vector_rows
+        ]
+        if not document_ids:
+            return []
+        with self._connect() as conn:
+            placeholders = ",".join("?" for _ in document_ids)
+            rows = conn.execute(
+                f"""
+                SELECT document_id, user_id, source, content, embedding_id, created_at
+                FROM documents
+                WHERE user_id = ? AND document_id IN ({placeholders})
+                """,
+                (user_id, *document_ids),
+            ).fetchall()
+        records_by_id = {row["document_id"]: self._document_from_row(row) for row in rows}
+        return [
+            records_by_id[document_id]
+            for document_id in document_ids
+            if document_id in records_by_id
+        ]
 
     @staticmethod
     def _merge_messages(
@@ -564,6 +709,23 @@ class MemoryManager:
                     "user_id": task.user_id,
                     "status": task.status,
                     "timestamp": task.created_at.isoformat(),
+                },
+            )
+        except Exception:
+            return None
+
+    def _safe_upsert_document(self, document: DocumentRecord) -> str | None:
+        if not self.vector_store.enabled:
+            return None
+        try:
+            return self.vector_store.upsert_document(
+                document.document_id,
+                document.content,
+                {
+                    "document_id": document.document_id,
+                    "user_id": document.user_id,
+                    "source": document.source,
+                    "timestamp": document.created_at.isoformat(),
                 },
             )
         except Exception:
@@ -643,5 +805,16 @@ class MemoryManager:
             summary=row["summary"],
             topics=row["topics"],
             sentiment=row["sentiment"],
+            created_at=cls._parse_datetime(row["created_at"]),
+        )
+
+    @classmethod
+    def _document_from_row(cls, row: sqlite3.Row) -> DocumentRecord:
+        return DocumentRecord(
+            document_id=row["document_id"],
+            user_id=row["user_id"],
+            source=row["source"],
+            content=row["content"],
+            embedding_id=row["embedding_id"],
             created_at=cls._parse_datetime(row["created_at"]),
         )

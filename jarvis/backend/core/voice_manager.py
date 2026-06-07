@@ -3,6 +3,7 @@ from __future__ import annotations
 import shlex
 import shutil
 import subprocess
+import tempfile
 import uuid
 from dataclasses import dataclass
 from enum import StrEnum
@@ -191,6 +192,20 @@ class VoiceManager:
             return self.stt_adapter.transcribe(Path(audio_path))
         finally:
             self.transition(VoiceState.IDLE)
+
+    def transcribe_audio(self, audio: bytes, suffix: str = ".webm") -> str:
+        if not audio:
+            raise RuntimeError("Audio data is required")
+        safe_suffix = suffix if suffix.startswith(".") and len(suffix) <= 10 else ".webm"
+        path = None
+        try:
+            with tempfile.NamedTemporaryFile(suffix=safe_suffix, delete=False) as handle:
+                handle.write(audio)
+                path = Path(handle.name)
+            return self.transcribe(path)
+        finally:
+            if path is not None:
+                path.unlink(missing_ok=True)
 
     def synthesize(self, text: str, voice_name: str | None = None) -> Path:
         self.transition(VoiceState.SPEAKING)

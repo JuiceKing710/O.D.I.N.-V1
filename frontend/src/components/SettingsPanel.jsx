@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import {
   checkRecoveryIntegrity,
   createRecoveryBackup,
+  fetchMemoryStatus,
   fetchModels,
   fetchVoiceStatus,
   loadModel,
@@ -16,6 +17,7 @@ const VOICE_MODE_OPTIONS = ["push_to_talk", "always_listening", "disabled"];
 
 export function SettingsPanel() {
   const [models, setModels] = useState([]);
+  const [memoryStatus, setMemoryStatus] = useState(null);
   const [backupSnapshot, setBackupSnapshot] = useState(null);
   const [provider, setProvider] = useState(null);
   const [permissionDraft, setPermissionDraft] = useState({});
@@ -61,6 +63,17 @@ export function SettingsPanel() {
       .then((status) => {
         if (!cancelled) {
           setVoiceStatus(status);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(err.message);
+        }
+      });
+    fetchMemoryStatus()
+      .then((status) => {
+        if (!cancelled) {
+          setMemoryStatus(status);
         }
       })
       .catch((err) => {
@@ -331,6 +344,31 @@ ollama pull llama3.2`}</pre>
               </>
             ) : (
               <div className="empty-state">Voice status unavailable.</div>
+            )}
+          </section>
+
+          <section className="settings-section" aria-label="Long-term memory">
+            <div className="section-heading">
+              <h2>Long-term Memory</h2>
+              {memoryStatus && (
+                <span className={memoryStatus.vector.enabled ? "status-ok" : "status-error"}>
+                  {memoryStatus.vector.enabled ? "Vector enabled" : "SQLite fallback"}
+                </span>
+              )}
+            </div>
+            {memoryStatus ? (
+              <dl className="settings-list">
+                <dt>Provider</dt>
+                <dd>{memoryStatus.vector.provider}</dd>
+                <dt>Collections</dt>
+                <dd>
+                  {Array.isArray(memoryStatus.vector.collections)
+                    ? memoryStatus.vector.collections.join(", ")
+                    : "messages, documents, tasks"}
+                </dd>
+              </dl>
+            ) : (
+              <div className="empty-state">Memory status unavailable.</div>
             )}
           </section>
 

@@ -49,9 +49,7 @@ class JarvisCore:
         if bot_reply is not None:
             reply = bot_reply
         else:
-            context = [
-                item.content for item in self.memory.query_messages(user.user_id, normalized, limit=5)
-            ]
+            context = self.memory.query_context(user.user_id, normalized, limit=5)
             reply = await self.lm_provider.generate(normalized, context=context, metadata=metadata or {})
 
         assistant_message = self.memory.add_message(convo.convo_id, "assistant", reply)
