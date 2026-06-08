@@ -12,7 +12,7 @@ The current build includes:
 - Functional research, code analysis, system command, and file read/write bots.
 - Interactive one-time permission approvals and audit logging.
 - Voice transcription/synthesis adapters, reflection summaries, and vector-memory integration.
-- Encrypted backup, restore, daily scheduling, catch-up, and retention controls.
+- Encrypted full-state backup, restore, daily scheduling, catch-up, and retention controls.
 - Frontend application shell with AI core, chat, dashboard, and settings components.
 - Electron desktop wrapper around the built React app.
 - Unit and API tests for core message handling, persistence, bot dispatch, permissions, CORS, tasks, and settings.
@@ -59,7 +59,9 @@ export JARVIS_WHISPER_COMMAND='whisper-cli {audio_path}'
 export JARVIS_TTS_COMMAND='tts-cli --text {text} --output {output_path}'
 ```
 
-Bot chat commands use `/<bot> <action> [text]`. Permissions set to `prompt` create a pending
+Jarvis recognizes explicit natural-language actions such as `research local assistants`,
+`analyze code path/to/file.py`, `read file notes.txt`, and `run command date`. Slash commands
+remain available as `/<bot> <action> [text]`. Permissions set to `prompt` create a pending
 one-time approval in Settings. Approving it executes that exact queued action; permissions set to
 `allowed` run without prompting:
 
@@ -87,15 +89,16 @@ The backend defaults to a SQLite database at `data/jarvis.db`. Override it with:
 export JARVIS_DB_PATH=/path/to/jarvis.db
 ```
 
-Encrypted SQLite backups and restore require an external secret. The key is never written into a
-backup or settings file:
+Encrypted backups include SQLite, settings, audit logs, and configured Chroma data. Jarvis creates
+a protected local key at `data/backup.key` automatically. Set an external secret to override it:
 
 ```bash
 export JARVIS_BACKUP_KEY='use-a-long-random-secret'
 export JARVIS_BACKUP_DIR=data/backups
 ```
 
-Backups use AES-GCM authenticated encryption. Restore validates the encrypted file and SQLite
+The key is never included in a backup. Backups use AES-GCM authenticated encryption. Restore
+validates the encrypted bundle and SQLite
 integrity, coordinates with live database activity, then creates an encrypted safety backup of the
 current database before replacement.
 While the backend is running, it creates a backup every day at 4:00 AM local time and retains the
@@ -119,11 +122,15 @@ npm run dev
 
 The frontend expects the backend at `http://127.0.0.1:8000` unless `VITE_API_BASE_URL` is set.
 
-Build and launch the Electron shell with:
+Build and launch the Electron app with:
 
 ```bash
 npm run desktop
 ```
+
+The desktop app starts and stops the FastAPI backend automatically and reports startup health for
+the model, voice, memory, and backups. Use the Data panel to export/delete conversations, remove
+long-term memory documents, and inspect the audit log.
 
 ## Tests
 
@@ -131,4 +138,5 @@ npm run desktop
 python -m unittest discover -s tests
 ruff check .
 cd frontend && npm run build && npm audit --audit-level=moderate
+cd frontend && npm test
 ```

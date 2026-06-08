@@ -31,13 +31,14 @@ class PermissionRequest:
     created_at: datetime
     metadata: dict[str, Any]
 
-    def to_api(self) -> dict[str, str]:
+    def to_api(self) -> dict[str, Any]:
         return {
             "request_id": self.request_id,
             "permission": self.permission,
             "actor": self.actor,
             "reason": self.reason,
             "created_at": self.created_at.isoformat(),
+            "metadata": self.metadata,
         }
 
 
@@ -51,13 +52,15 @@ class PermissionApprovalRequired(PermissionError):
 
 
 class PermissionManager:
-    def __init__(self, permissions: dict[str, Permission]) -> None:
+    def __init__(self, permissions: dict[str, Permission], storage_path: Path | None = None) -> None:
         self._permissions = permissions
+        self.storage_path = storage_path
         self._pending_requests: dict[str, PermissionRequest] = {}
         self._one_time_grants: dict[tuple[str, str, str], int] = {}
+        self._load_pending_requests()
 
     @classmethod
-    def from_manifest(cls, path: Path) -> "PermissionManager":
+    def from_manifest(cls, path: Path, storage_path: Path | None = None) -> "PermissionManager":
         with path.open("r", encoding="utf-8") as handle:
             raw = json.load(handle)
         permissions = {
@@ -68,7 +71,7 @@ class PermissionManager:
             )
             for item in raw.get("permissions", [])
         }
-        return cls(permissions)
+        return cls(permissions, storage_path=storage_path)
 
     def decision_for(self, permission_name: str) -> PermissionDecision:
         permission = self._permissions.get(permission_name)
@@ -125,6 +128,7 @@ class PermissionManager:
             metadata=metadata or {},
         )
         self._pending_requests[request.request_id] = request
+        self._save_pending_requests()
         raise PermissionApprovalRequired(request)
 
     def pending_requests(self) -> list[PermissionRequest]:
@@ -139,7 +143,33 @@ class PermissionManager:
         if decision == PermissionDecision.ALLOWED:
             grant_key = (request.permission, request.actor, request.reason)
             self._one_time_grants[grant_key] = self._one_time_grants.get(grant_key, 0) + 1
+        self._save_pending_requests()
         return request
 
     def as_settings(self) -> dict[str, str]:
         return {name: permission.default.value for name, permission in self._permissions.items()}
+
+    def _load_pending_requests(self) -> None:
+        if self.storage_path is None or not self.storage_path.is_file():
+            return
+        try:
+            raw = json.loads(self.storage_path.read_text(encoding="utf-8"))
+            for item in raw:
+                request = PermissionRequest(
+                    request_id=item["request_id"],
+                    permission=item["permission"],
+                    actor=item["actor"],
+                    reason=item["reason"],
+                    created_at=datetime.fromisoformat(item["created_at"]),
+                    metadata=item.get("metadata") or {},
+                )
+                self._pending_requests[request.request_id] = request
+        except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
+            self._pending_requests = {}
+
+    def _save_pending_requests(self) -> None:
+        if self.storage_path is None:
+            return
+        self.storage_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = [request.to_api() for request in self.pending_requests()]
+        self.storage_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")

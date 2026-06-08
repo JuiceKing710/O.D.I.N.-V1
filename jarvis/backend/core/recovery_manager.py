@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import os
+import json
+import shutil
 import sqlite3
 import tempfile
 import threading
+import zipfile
 from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -58,11 +61,17 @@ class RecoveryManager:
         vector_store: VectorStoreInterface,
         encryption_key: str | bytes | None = None,
         db_lock: threading.RLock | None = None,
+        settings_path: Path | str | None = None,
+        audit_log_path: Path | str | None = None,
+        vector_path: Path | str | None = None,
     ) -> None:
         self.db_path = Path(db_path)
         self.backup_dir = Path(backup_dir)
         self.vector_store = vector_store
         self.db_lock = db_lock or threading.RLock()
+        self.settings_path = Path(settings_path) if settings_path else None
+        self.audit_log_path = Path(audit_log_path) if audit_log_path else None
+        self.vector_path = Path(vector_path) if vector_path else None
         self.encryption_key = (
             encryption_key.encode("utf-8") if isinstance(encryption_key, str) else encryption_key
         )
@@ -104,15 +113,15 @@ class RecoveryManager:
             created_at = datetime.now(timezone.utc)
             timestamp = created_at.strftime("%Y%m%dT%H%M%S%fZ")
             target = self.backup_dir / f"jarvis-{timestamp}.db.enc"
-            with tempfile.NamedTemporaryFile(dir=self.backup_dir, suffix=".db", delete=False) as handle:
-                temporary_path = Path(handle.name)
-            try:
+            with tempfile.TemporaryDirectory(dir=self.backup_dir) as temporary_dir:
+                staging = Path(temporary_dir)
+                database_snapshot = staging / "jarvis.db"
                 with closing(sqlite3.connect(self.db_path)) as source:
-                    with closing(sqlite3.connect(temporary_path)) as backup:
+                    with closing(sqlite3.connect(database_snapshot)) as backup:
                         source.backup(backup)
-                target.write_bytes(self._encrypt(temporary_path.read_bytes()))
-            finally:
-                temporary_path.unlink(missing_ok=True)
+                archive_path = staging / "jarvis-backup.zip"
+                self._create_bundle_archive(archive_path, database_snapshot, created_at)
+                target.write_bytes(self._encrypt(archive_path.read_bytes()))
             return BackupSnapshot(path=target, created_at=created_at, encrypted=True)
 
     def list_backups(self) -> list[BackupSnapshot]:
@@ -143,19 +152,23 @@ class RecoveryManager:
             source = self._resolve_backup(filename)
             plaintext = self._decrypt(source.read_bytes())
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
-            with tempfile.NamedTemporaryFile(
-                dir=self.db_path.parent,
-                suffix=".restore.db",
-                delete=False,
-            ) as handle:
-                temporary_path = Path(handle.name)
-                handle.write(plaintext)
-            try:
+            with tempfile.TemporaryDirectory(dir=self.db_path.parent) as temporary_dir:
+                staging = Path(temporary_dir)
+                temporary_path = staging / "jarvis.db"
+                bundle = plaintext.startswith(b"PK")
+                if bundle:
+                    archive_path = staging / "backup.zip"
+                    archive_path.write_bytes(plaintext)
+                    with zipfile.ZipFile(archive_path) as archive:
+                        archive.extractall(staging / "bundle")
+                    temporary_path = staging / "bundle" / "database" / "jarvis.db"
+                else:
+                    temporary_path.write_bytes(plaintext)
                 self._validate_sqlite(temporary_path)
                 safety_backup = self.create_sqlite_backup() if self.db_path.exists() else None
                 os.replace(temporary_path, self.db_path)
-            finally:
-                temporary_path.unlink(missing_ok=True)
+                if bundle:
+                    self._restore_optional_bundle_files(staging / "bundle")
             return RestoreSnapshot(
                 path=self.db_path,
                 restored_from=source,
@@ -163,6 +176,52 @@ class RecoveryManager:
                 created_at=datetime.now(timezone.utc),
                 encrypted=True,
             )
+
+    def _create_bundle_archive(
+        self,
+        archive_path: Path,
+        database_snapshot: Path,
+        created_at: datetime,
+    ) -> None:
+        with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            archive.write(database_snapshot, "database/jarvis.db")
+            archive.writestr(
+                "manifest.json",
+                json.dumps(
+                    {
+                        "format": 2,
+                        "created_at": created_at.isoformat(),
+                        "includes": ["database", "settings", "audit", "vector"],
+                    },
+                    sort_keys=True,
+                ),
+            )
+            for source, name in (
+                (self.settings_path, "settings/settings.json"),
+                (self.audit_log_path, "audit/audit.log"),
+            ):
+                if source and source.is_file():
+                    archive.write(source, name)
+            if self.vector_path and self.vector_path.is_dir():
+                for path in self.vector_path.rglob("*"):
+                    if path.is_file():
+                        archive.write(path, Path("vector") / path.relative_to(self.vector_path))
+
+    def _restore_optional_bundle_files(self, bundle_path: Path) -> None:
+        for source, target in (
+            (bundle_path / "settings" / "settings.json", self.settings_path),
+            (bundle_path / "audit" / "audit.log", self.audit_log_path),
+        ):
+            if target and source.is_file():
+                target.parent.mkdir(parents=True, exist_ok=True)
+                os.replace(source, target)
+        source_vector = bundle_path / "vector"
+        if self.vector_path and source_vector.is_dir():
+            temporary_vector = self.vector_path.with_name(f"{self.vector_path.name}.restore")
+            shutil.rmtree(temporary_vector, ignore_errors=True)
+            shutil.copytree(source_vector, temporary_vector)
+            shutil.rmtree(self.vector_path, ignore_errors=True)
+            os.replace(temporary_vector, self.vector_path)
 
     def _resolve_backup(self, filename: str) -> Path:
         backup_dir = self.backup_dir.resolve()

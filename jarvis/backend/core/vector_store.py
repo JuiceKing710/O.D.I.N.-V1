@@ -41,6 +41,10 @@ class VectorStoreInterface(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def delete(self, collection: str, record_id: str) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
     def health(self) -> dict[str, Any]:
         raise NotImplementedError
 
@@ -66,6 +70,9 @@ class NullVectorStore(VectorStoreInterface):
     def query(self, collection: str, text: str, limit: int) -> list[VectorSearchResult]:
         return []
 
+    def delete(self, collection: str, record_id: str) -> None:
+        return None
+
     def health(self) -> dict[str, Any]:
         return {"enabled": False, "provider": "null"}
 
@@ -84,6 +91,11 @@ class ChromaVectorStore(VectorStoreInterface):
             name: self._client.get_or_create_collection(name=name)
             for name in ("messages", "documents", "tasks")
         }
+
+    def delete(self, collection: str, record_id: str) -> None:
+        target = self._collections.get(collection)
+        if target is not None:
+            target.delete(ids=[record_id])
 
     @property
     def enabled(self) -> bool:
@@ -202,6 +214,9 @@ class InMemoryVectorStore(VectorStoreInterface):
                 )
         rows.sort(key=lambda row: row.score or 0.0, reverse=True)
         return rows[:limit]
+
+    def delete(self, collection: str, record_id: str) -> None:
+        self._collections.get(collection, {}).pop(record_id, None)
 
     def health(self) -> dict[str, Any]:
         return {

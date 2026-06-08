@@ -17,7 +17,10 @@ from jarvis.backend.api.models import (
     ChatRequest,
     ChatResponse,
     ConversationMessageResponse,
+    ConversationExportResponse,
     ConversationSummaryResponse,
+    DeleteResponse,
+    DocumentResponse,
     EventResponse,
     IntegrityResponse,
     MemoryItem,
@@ -31,6 +34,7 @@ from jarvis.backend.api.models import (
     PermissionResolveResponse,
     SettingsResponse,
     SettingsUpdateRequest,
+    StartupHealthResponse,
     ReflectionRequest,
     ReflectionResponse,
     RestoreRequest,
@@ -47,6 +51,7 @@ from jarvis.backend.api.models import (
 )
 from jarvis.backend.core.app_factory import (
     get_backup_scheduler,
+    get_audit_logger,
     get_core,
     get_event_bus,
     get_permission_manager,
@@ -62,6 +67,7 @@ from jarvis.backend.core.recovery_manager import RecoveryManager
 from jarvis.backend.core.settings_store import SettingsStore
 from jarvis.backend.core.voice_manager import VoiceManager, VoiceState
 from jarvis.backend.utils.reflection import ReflectionEngine
+from jarvis.backend.utils.audit_logging import AuditLogger
 from jarvis.backend.utils.permissions import PermissionDecision, PermissionManager
 
 router = APIRouter(prefix="/api/v1")
@@ -75,6 +81,38 @@ def _settings_response(
     permission_manager.update_decisions(stored_permissions)
     data["permissions"] = permission_manager.as_settings()
     return SettingsResponse(**data)
+
+
+@router.get("/health/startup", response_model=StartupHealthResponse)
+async def startup_health(
+    core: JarvisCore = Depends(get_core),
+    voice_manager: VoiceManager = Depends(get_voice_manager),
+    recovery_manager: RecoveryManager = Depends(get_recovery_manager),
+    scheduler: BackupScheduler = Depends(get_backup_scheduler),
+) -> StartupHealthResponse:
+    provider = await core.lm_provider.status()
+    voice = voice_manager.status()
+    recovery = recovery_manager.check_integrity()
+    services = {
+        "backend": {"ok": True, "detail": "API online"},
+        "model": {
+            "ok": provider.available,
+            "detail": provider.selected_model or provider.error or provider.provider,
+        },
+        "voice": {
+            "ok": voice.tts_configured,
+            "detail": f"STT: {voice.stt_adapter}; TTS: {voice.tts_adapter}",
+        },
+        "memory": {"ok": recovery.sqlite_ok, "detail": core.memory.vector_store.health()},
+        "backups": {
+            "ok": recovery.details.get("encryption") == "configured",
+            "detail": scheduler.status().to_api(),
+        },
+    }
+    return StartupHealthResponse(
+        ready=services["backend"]["ok"] and services["memory"]["ok"],
+        services=services,
+    )
 
 
 @router.post("/chat", response_model=ChatResponse)
@@ -138,6 +176,68 @@ def list_conversation_messages(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     rows = core.memory.list_conversation_messages(conversation_id)
     return [ConversationMessageResponse(**row.to_api()) for row in rows]
+
+
+@router.get(
+    "/conversations/{conversation_id}/export",
+    response_model=ConversationExportResponse,
+)
+def export_conversation(
+    conversation_id: int,
+    username: str = "local-user",
+    core: JarvisCore = Depends(get_core),
+) -> ConversationExportResponse:
+    user = core.memory.get_or_create_user(username)
+    core.memory.get_conversation(conversation_id, user.user_id)
+    summary = next(
+        item
+        for item in core.memory.list_conversations(user.user_id, limit=1000)
+        if item.convo_id == conversation_id
+    )
+    return ConversationExportResponse(
+        conversation=ConversationSummaryResponse(**summary.to_api()),
+        messages=[
+            ConversationMessageResponse(**row.to_api())
+            for row in core.memory.list_conversation_messages(conversation_id)
+        ],
+    )
+
+
+@router.delete("/conversations/{conversation_id}", response_model=DeleteResponse)
+def delete_conversation(
+    conversation_id: int,
+    username: str = "local-user",
+    core: JarvisCore = Depends(get_core),
+) -> DeleteResponse:
+    user = core.memory.get_or_create_user(username)
+    try:
+        core.memory.delete_conversation(user.user_id, conversation_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return DeleteResponse(deleted=True, id=str(conversation_id))
+
+
+@router.get("/memory/documents", response_model=list[DocumentResponse])
+def list_memory_documents(
+    username: str = "local-user",
+    core: JarvisCore = Depends(get_core),
+) -> list[DocumentResponse]:
+    user = core.memory.get_or_create_user(username)
+    return [DocumentResponse(**document.to_api()) for document in core.memory.list_documents(user.user_id)]
+
+
+@router.delete("/memory/documents/{document_id}", response_model=DeleteResponse)
+def delete_memory_document(
+    document_id: str,
+    username: str = "local-user",
+    core: JarvisCore = Depends(get_core),
+) -> DeleteResponse:
+    user = core.memory.get_or_create_user(username)
+    try:
+        core.memory.delete_document(user.user_id, document_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return DeleteResponse(deleted=True, id=document_id)
 
 
 @router.get(
@@ -244,6 +344,20 @@ def update_task(
         raise HTTPException(status_code=status_code, detail=str(exc)) from exc
     event_bus.publish("task.updated", {"task": task.to_api(), "action": "updated"})
     return TaskResponse(**task.to_api())
+
+
+@router.delete("/tasks/{task_id}", response_model=DeleteResponse)
+def delete_task(
+    task_id: int,
+    username: str = "local-user",
+    core: JarvisCore = Depends(get_core),
+) -> DeleteResponse:
+    user = core.memory.get_or_create_user(username)
+    try:
+        core.memory.delete_task(user.user_id, task_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return DeleteResponse(deleted=True, id=str(task_id))
 
 
 @router.get("/settings", response_model=SettingsResponse)
@@ -367,6 +481,14 @@ async def load_model(
 @router.get("/events/history", response_model=list[EventResponse])
 def event_history(event_bus: EventBus = Depends(get_event_bus)) -> list[EventResponse]:
     return [EventResponse(**event.to_api()) for event in event_bus.history()]
+
+
+@router.get("/audit/events", response_model=list[dict])
+def audit_events(
+    limit: int = 100,
+    audit_logger: AuditLogger = Depends(get_audit_logger),
+) -> list[dict]:
+    return audit_logger.list_events(min(max(limit, 1), 500))
 
 
 @router.websocket("/events")

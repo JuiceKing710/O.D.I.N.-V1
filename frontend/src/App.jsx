@@ -3,8 +3,10 @@ import { createRoot } from "react-dom/client";
 import { AICore } from "./components/AICore.jsx";
 import { ChatView } from "./components/ChatView.jsx";
 import { CoreFocusView } from "./components/CoreFocusView.jsx";
+import { DataPanel } from "./components/DataPanel.jsx";
 import { ProjectDashboard } from "./components/ProjectDashboard.jsx";
 import { SettingsPanel } from "./components/SettingsPanel.jsx";
+import { StartupHealth } from "./components/StartupHealth.jsx";
 import { connectEvents } from "./ipc/apiClient.js";
 import { AppStateProvider, useAppState } from "./state/appContext.jsx";
 import { useChatStore } from "./state/chatStore.js";
@@ -13,6 +15,7 @@ import "./styles.css";
 const PANELS = [
   { id: "chat", label: "Chat" },
   { id: "projects", label: "Projects" },
+  { id: "data", label: "Data" },
   { id: "settings", label: "Settings" },
 ];
 
@@ -92,8 +95,10 @@ function App() {
         </dl>
       </aside>
       <section className="workspace">
+        <StartupHealth />
         {activePanel === "chat" && <ChatView onOpenCoreFocus={() => setCoreFocus(true)} />}
         {activePanel === "projects" && <ProjectDashboard />}
+        {activePanel === "data" && <DataPanel />}
         {activePanel === "settings" && <SettingsPanel />}
       </section>
     </main>

@@ -42,6 +42,29 @@ class MemoryStatusResponse(BaseModel):
     vector: dict[str, Any]
 
 
+class DocumentResponse(BaseModel):
+    document_id: str
+    user_id: int
+    source: str
+    content: str
+    created_at: datetime
+
+
+class DeleteResponse(BaseModel):
+    deleted: bool
+    id: str
+
+
+class ConversationExportResponse(BaseModel):
+    conversation: ConversationSummaryResponse
+    messages: list[ConversationMessageResponse]
+
+
+class StartupHealthResponse(BaseModel):
+    ready: bool
+    services: dict[str, dict[str, Any]]
+
+
 class ConversationSummaryResponse(BaseModel):
     convo_id: int
     user_id: int
@@ -115,6 +138,7 @@ class PermissionRequestResponse(BaseModel):
     actor: str
     reason: str
     created_at: datetime
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class PermissionResolveRequest(BaseModel):

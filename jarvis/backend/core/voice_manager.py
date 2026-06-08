@@ -224,9 +224,24 @@ class VoiceManager:
     def synthesize(self, text: str, voice_name: str | None = None) -> Path:
         self.transition(VoiceState.SPEAKING)
         try:
-            return self.tts_adapter.synthesize(text, voice_name)
+            output = self.tts_adapter.synthesize(text, voice_name)
+            self._prune_voice_outputs(output)
+            return output
         finally:
             self.transition(VoiceState.IDLE)
+
+    def _prune_voice_outputs(self, current: Path, keep: int = 20) -> None:
+        output_dir = getattr(self.tts_adapter, "output_dir", None)
+        if output_dir is None:
+            return
+        files = sorted(
+            (path for path in Path(output_dir).glob("jarvis-*") if path.is_file()),
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )
+        for stale in files[keep:]:
+            if stale != current:
+                stale.unlink(missing_ok=True)
 
     def detect_interruption(self, normalized_energy: float) -> bool:
         if self.state != VoiceState.SPEAKING:

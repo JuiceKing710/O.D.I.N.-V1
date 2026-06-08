@@ -29,3 +29,15 @@ class AuditLogger:
             handle.write(json.dumps(event, sort_keys=True))
             handle.write("\n")
 
+    def list_events(self, limit: int = 100) -> list[dict[str, Any]]:
+        if not self.path.is_file():
+            return []
+        events = []
+        for line in self.path.read_text(encoding="utf-8").splitlines():
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(event, dict):
+                events.append(event)
+        return events[-limit:][::-1]

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sqlite3
 import tempfile
 import unittest
 import urllib.error
@@ -60,6 +61,9 @@ class BrokenVectorStore(VectorStoreInterface):
 
     def query(self, collection: str, text: str, limit: int):
         raise RuntimeError("vector query failed")
+
+    def delete(self, collection: str, record_id: str) -> None:
+        raise RuntimeError("vector delete failed")
 
     def health(self) -> dict[str, Any]:
         return {"enabled": True, "provider": "broken"}
@@ -146,6 +150,16 @@ class CoreTests(unittest.TestCase):
         self.permissions.update_decisions({"read_files": "allowed"})
 
         result = asyncio.run(self.core.handle_message(f"/code analyze {path}", "tester"))
+
+        self.assertEqual(result["bot"], "code")
+        self.assertIn("Analyzed", result["reply"])
+
+    def test_natural_language_request_dispatches_allowlisted_bot_action(self) -> None:
+        path = Path(self.tmp.name) / "natural.py"
+        path.write_text("def ready():\n    return True\n", encoding="utf-8")
+        self.permissions.update_decisions({"read_files": "allowed"})
+
+        result = asyncio.run(self.core.handle_message(f"analyze code {path}", "tester"))
 
         self.assertEqual(result["bot"], "code")
         self.assertIn("Analyzed", result["reply"])
@@ -279,6 +293,24 @@ class CoreTests(unittest.TestCase):
                 reason="Read file: sample.py",
             )
 
+    def test_pending_permission_requests_survive_restart_without_grants(self) -> None:
+        storage = Path(self.tmp.name) / "permissions.json"
+        permissions = {
+            "read_files": Permission("read_files", "read files", PermissionDecision.PROMPT)
+        }
+        first = PermissionManager(permissions, storage_path=storage)
+        with self.assertRaises(PermissionApprovalRequired):
+            first.require_allowed("read_files", actor="tester", reason="Read file: sample.py")
+
+        restarted = PermissionManager(permissions, storage_path=storage)
+
+        self.assertEqual(len(restarted.pending_requests()), 1)
+        request = restarted.pending_requests()[0]
+        restarted.resolve_request(request.request_id, PermissionDecision.ALLOWED)
+        restarted.require_allowed("read_files", actor="tester", reason="Read file: sample.py")
+        with self.assertRaises(PermissionApprovalRequired):
+            restarted.require_allowed("read_files", actor="tester", reason="Read file: sample.py")
+
     def test_vector_failure_falls_back_to_sqlite_query(self) -> None:
         memory = MemoryManager(Path(self.tmp.name) / "broken.db", vector_store=BrokenVectorStore())
         user = memory.get_or_create_user("vector-user")
@@ -301,6 +333,44 @@ class CoreTests(unittest.TestCase):
 
         self.assertEqual(matches[0].content, "semantic nebula memory")
         self.assertTrue(matches[0].embedding_id)
+
+    def test_database_schema_has_explicit_version(self) -> None:
+        with sqlite3.connect(self.memory.db_path) as connection:
+            version = connection.execute("PRAGMA user_version").fetchone()[0]
+
+        self.assertEqual(version, 1)
+
+    def test_full_backup_bundle_restores_settings_audit_and_vector_files(self) -> None:
+        base = Path(self.tmp.name) / "bundle"
+        db_path = base / "jarvis.db"
+        settings_path = base / "settings.json"
+        audit_path = base / "audit.log"
+        vector_path = base / "chroma"
+        MemoryManager(db_path).get_or_create_user("bundle-user")
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        settings_path.write_text('{"theme":"dark"}', encoding="utf-8")
+        audit_path.write_text('{"action":"before"}\n', encoding="utf-8")
+        vector_path.mkdir()
+        (vector_path / "index.bin").write_bytes(b"vector-before")
+        recovery = RecoveryManager(
+            db_path,
+            base / "backups",
+            NullVectorStore(),
+            encryption_key="bundle-key",
+            settings_path=settings_path,
+            audit_log_path=audit_path,
+            vector_path=vector_path,
+        )
+        snapshot = recovery.create_sqlite_backup()
+        settings_path.write_text('{"theme":"light"}', encoding="utf-8")
+        audit_path.write_text('{"action":"after"}\n', encoding="utf-8")
+        (vector_path / "index.bin").write_bytes(b"vector-after")
+
+        recovery.restore_sqlite_backup(snapshot.path.name)
+
+        self.assertEqual(settings_path.read_text(encoding="utf-8"), '{"theme":"dark"}')
+        self.assertIn("before", audit_path.read_text(encoding="utf-8"))
+        self.assertEqual((vector_path / "index.bin").read_bytes(), b"vector-before")
 
     def test_lm_provider_loads_selected_model(self) -> None:
         provider = EchoLMProvider()

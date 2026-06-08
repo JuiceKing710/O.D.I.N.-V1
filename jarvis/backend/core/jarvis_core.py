@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import re
 from typing import Any
 
 from jarvis.backend.core.bot_manager import BotManager, BotMessage
@@ -80,19 +81,53 @@ class JarvisCore:
         )
 
     async def _maybe_dispatch_bot(self, message: str) -> tuple[str | None, str | None]:
-        if not message.startswith("/"):
+        parsed = self._parse_bot_request(message)
+        if parsed is None:
             return None, None
-        parts = message[1:].split(maxsplit=2)
-        if len(parts) < 2:
-            return None, "Bot command format is /<bot_name> <action> [text]."
-        bot_name, action = parts[0], parts[1]
-        payload = {"text": parts[2] if len(parts) == 3 else ""}
+        bot_name, action, payload = parsed
+        bot = self.bot_manager.get(bot_name)
+        if bot is None or action not in bot.capabilities():
+            return bot_name, f"Unsupported planned action: {bot_name}.{action}"
         response = await self.bot_manager.dispatch(
             BotMessage(sender="user", recipient=bot_name, action=action, payload=payload)
         )
         if response is None:
             return bot_name, f"Unknown bot: {bot_name}"
         if not response.ok:
+            pending = response.payload.get("permission_request")
+            if isinstance(pending, dict):
+                reason = pending.get("reason") or f"{bot_name}.{action}"
+                return bot_name, f"Approval required before Jarvis can continue: {reason}"
             return bot_name, response.error or "Bot request failed."
         text = response.payload.get("text")
         return bot_name, str(text) if text is not None else "Bot request completed."
+
+    @staticmethod
+    def _parse_bot_request(message: str) -> tuple[str, str, dict[str, Any]] | None:
+        if message.startswith("/"):
+            parts = message[1:].split(maxsplit=2)
+            if len(parts) < 2:
+                return None
+            return parts[0], parts[1], {"text": parts[2] if len(parts) == 3 else ""}
+
+        patterns = (
+            (r"^(?:research|search the web for|look up)\s+(.+)$", "research", "search"),
+            (r"^(?:analyze code|analyze file)\s+(.+)$", "code", "analyze"),
+            (r"^(?:read file|open file)\s+(.+)$", "file", "read"),
+            (r"^(?:run command|execute command)\s+(.+)$", "system", "execute"),
+        )
+        for pattern, bot, action in patterns:
+            match = re.match(pattern, message.strip(), flags=re.IGNORECASE | re.DOTALL)
+            if match:
+                return bot, action, {"text": match.group(1).strip()}
+        write_match = re.match(
+            r"^write file\s+([^\n]+)\n(.+)$",
+            message.strip(),
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        if write_match:
+            return "file", "write", {
+                "path": write_match.group(1).strip(),
+                "content": write_match.group(2),
+            }
+        return None

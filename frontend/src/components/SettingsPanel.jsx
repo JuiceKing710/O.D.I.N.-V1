@@ -505,6 +505,11 @@ ollama pull llama3.2`}</pre>
                     <span>
                       <strong>{request.permission.replaceAll("_", " ")}</strong>
                       <small>{request.reason}</small>
+                      {request.metadata?.bot && (
+                        <small>
+                          Planned action: {request.metadata.bot}.{request.metadata.action}
+                        </small>
+                      )}
                     </span>
                     <div className="settings-actions">
                       <button

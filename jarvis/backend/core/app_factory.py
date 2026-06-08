@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import secrets
 import threading
 from functools import lru_cache
 from pathlib import Path
@@ -52,9 +53,24 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _backup_key() -> str:
+    configured = os.environ.get("JARVIS_BACKUP_KEY")
+    if configured:
+        return configured
+    key_path = Path(os.environ.get("JARVIS_BACKUP_KEY_PATH", "data/backup.key"))
+    key_path.parent.mkdir(parents=True, exist_ok=True)
+    if not key_path.exists():
+        key_path.write_text(secrets.token_urlsafe(48), encoding="utf-8")
+        key_path.chmod(0o600)
+    return key_path.read_text(encoding="utf-8").strip()
+
+
 @lru_cache(maxsize=1)
 def get_permission_manager() -> PermissionManager:
-    return PermissionManager.from_manifest(PACKAGE_ROOT / "config" / "permissions.json")
+    return PermissionManager.from_manifest(
+        PACKAGE_ROOT / "config" / "permissions.json",
+        storage_path=Path(os.environ.get("JARVIS_PERMISSION_REQUESTS_PATH", "data/permissions.json")),
+    )
 
 
 @lru_cache(maxsize=1)
@@ -65,6 +81,11 @@ def get_settings_store() -> SettingsStore:
 @lru_cache(maxsize=1)
 def get_event_bus() -> EventBus:
     return EventBus()
+
+
+@lru_cache(maxsize=1)
+def get_audit_logger() -> AuditLogger:
+    return AuditLogger(Path(os.environ.get("JARVIS_AUDIT_LOG", "data/audit.log")))
 
 
 @lru_cache(maxsize=1)
@@ -85,12 +106,16 @@ def get_vector_store() -> VectorStoreInterface:
 
 @lru_cache(maxsize=1)
 def get_recovery_manager() -> RecoveryManager:
+    vector_path = os.environ.get("JARVIS_CHROMA_PATH")
     return RecoveryManager(
         db_path=_default_db_path(),
         backup_dir=Path(os.environ.get("JARVIS_BACKUP_DIR", "data/backups")),
         vector_store=get_vector_store(),
-        encryption_key=os.environ.get("JARVIS_BACKUP_KEY"),
+        encryption_key=_backup_key(),
         db_lock=get_db_lock(),
+        settings_path=Path(os.environ.get("JARVIS_SETTINGS_PATH", "data/settings.json")),
+        audit_log_path=Path(os.environ.get("JARVIS_AUDIT_LOG", "data/audit.log")),
+        vector_path=Path(vector_path) if vector_path else None,
     )
 
 
@@ -132,7 +157,7 @@ def get_voice_manager() -> VoiceManager:
 @lru_cache(maxsize=1)
 def get_core() -> JarvisCore:
     permission_manager = get_permission_manager()
-    audit_logger = AuditLogger(Path(os.environ.get("JARVIS_AUDIT_LOG", "data/audit.log")))
+    audit_logger = get_audit_logger()
     event_bus = get_event_bus()
     memory = MemoryManager(
         _default_db_path(),

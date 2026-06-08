@@ -1,4 +1,7 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
+const API_BASE_URL =
+  globalThis.jarvisDesktop?.apiBaseUrl ||
+  import.meta.env.VITE_API_BASE_URL ||
+  "http://127.0.0.1:8000";
 
 export function resolveApiUrl(path) {
   return new URL(path, API_BASE_URL).toString();
@@ -38,6 +41,10 @@ export function sendChatMessage({ message, username = "local-user", conversation
 
 export function fetchSettings() {
   return request("/api/v1/settings");
+}
+
+export function fetchStartupHealth() {
+  return request("/api/v1/health/startup");
 }
 
 export function fetchVoiceStatus() {
@@ -125,6 +132,34 @@ export function fetchConversationMessages(conversationId, username = "local-user
   );
 }
 
+export function exportConversation(conversationId, username = "local-user") {
+  return request(
+    `/api/v1/conversations/${conversationId}/export?username=${encodeURIComponent(username)}`,
+  );
+}
+
+export function deleteConversation(conversationId, username = "local-user") {
+  return request(
+    `/api/v1/conversations/${conversationId}?username=${encodeURIComponent(username)}`,
+    { method: "DELETE" },
+  );
+}
+
+export function fetchMemoryDocuments(username = "local-user") {
+  return request(`/api/v1/memory/documents?username=${encodeURIComponent(username)}`);
+}
+
+export function deleteMemoryDocument(documentId, username = "local-user") {
+  return request(
+    `/api/v1/memory/documents/${encodeURIComponent(documentId)}?username=${encodeURIComponent(username)}`,
+    { method: "DELETE" },
+  );
+}
+
+export function fetchAuditEvents(limit = 100) {
+  return request(`/api/v1/audit/events?limit=${limit}`);
+}
+
 export function fetchReflections(conversationId, username = "local-user") {
   return request(
     `/api/v1/conversations/${conversationId}/reflections?username=${encodeURIComponent(username)}`,
@@ -162,6 +197,12 @@ export function updateTask({ taskId, name, description, status, username = "loca
       status,
       username,
     }),
+  });
+}
+
+export function deleteTask(taskId, username = "local-user") {
+  return request(`/api/v1/tasks/${taskId}?username=${encodeURIComponent(username)}`, {
+    method: "DELETE",
   });
 }
 

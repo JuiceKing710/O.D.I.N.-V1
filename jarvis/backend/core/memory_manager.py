@@ -11,6 +11,8 @@ from typing import Any, Iterator, Literal
 
 from jarvis.backend.core.vector_store import NullVectorStore, VectorStoreInterface
 
+SCHEMA_VERSION = 1
+
 
 @dataclass(slots=True)
 class UserRecord:
@@ -480,6 +482,54 @@ class MemoryManager:
             ).fetchall()
         return [self._message_from_row(row) for row in rows]
 
+    def delete_conversation(self, user_id: int, convo_id: int) -> None:
+        self.get_conversation(convo_id, user_id)
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT msg_id FROM messages WHERE convo_id = ?", (convo_id,)
+            ).fetchall()
+            conn.execute("DELETE FROM reflection_summaries WHERE convo_id = ?", (convo_id,))
+            conn.execute("DELETE FROM messages WHERE convo_id = ?", (convo_id,))
+            conn.execute(
+                "DELETE FROM conversations WHERE convo_id = ? AND user_id = ?",
+                (convo_id, user_id),
+            )
+        for row in rows:
+            self.vector_store.delete("messages", f"message:{row['msg_id']}")
+        self.cache.clear()
+
+    def delete_task(self, user_id: int, task_id: int) -> None:
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "DELETE FROM tasks WHERE task_id = ? AND user_id = ?", (task_id, user_id)
+            )
+        if cursor.rowcount == 0:
+            raise ValueError(f"Task not found: {task_id}")
+        self.vector_store.delete("tasks", f"task:{task_id}")
+
+    def list_documents(self, user_id: int) -> list[DocumentRecord]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT document_id, user_id, source, content, embedding_id, created_at
+                FROM documents
+                WHERE user_id = ?
+                ORDER BY created_at DESC, document_id DESC
+                """,
+                (user_id,),
+            ).fetchall()
+        return [self._document_from_row(row) for row in rows]
+
+    def delete_document(self, user_id: int, document_id: str) -> None:
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "DELETE FROM documents WHERE document_id = ? AND user_id = ?",
+                (document_id, user_id),
+            )
+        if cursor.rowcount == 0:
+            raise ValueError(f"Document not found: {document_id}")
+        self.vector_store.delete("documents", f"document:{document_id}")
+
     def save_reflection_summary(
         self,
         convo_id: int,
@@ -522,6 +572,12 @@ class MemoryManager:
 
     def _initialize(self) -> None:
         with self._connect() as conn:
+            current_version = conn.execute("PRAGMA user_version").fetchone()[0]
+            if current_version > SCHEMA_VERSION:
+                raise RuntimeError(
+                    f"Database schema {current_version} is newer than supported version "
+                    f"{SCHEMA_VERSION}"
+                )
             conn.executescript(
                 """
                 PRAGMA foreign_keys = ON;
@@ -598,8 +654,11 @@ class MemoryManager:
                   ON reflection_summaries(convo_id);
                 CREATE INDEX IF NOT EXISTS idx_documents_user_id
                   ON documents(user_id);
+
                 """
             )
+            if current_version < SCHEMA_VERSION:
+                conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     def _query_vector_messages(
         self, user_id: int, query: str, limit: int

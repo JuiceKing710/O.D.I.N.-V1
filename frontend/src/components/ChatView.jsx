@@ -356,7 +356,11 @@ export function ChatView({ onOpenCoreFocus }) {
       setVoiceState("listening");
       setVoiceNotice("");
     } catch (error) {
-      setVoiceNotice(error.message);
+      setVoiceNotice(
+        error?.name === "NotAllowedError"
+          ? "Microphone access was denied. Allow microphone access in system settings, then try again."
+          : `Microphone could not start: ${error.message}`,
+      );
     }
   }
 

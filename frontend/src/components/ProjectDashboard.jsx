@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { createTask, fetchTasks, updateTask } from "../ipc/apiClient.js";
+import { createTask, deleteTask, fetchTasks, updateTask } from "../ipc/apiClient.js";
 import { useAppState } from "../state/appContext.jsx";
 import { useChatStore } from "../state/chatStore.js";
 
@@ -86,6 +86,22 @@ export function ProjectDashboard() {
       });
       setTasks(tasks.map((current) => (current.task_id === task.task_id ? task : current)));
       setSelectedTaskId(task.task_id);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleTaskDelete() {
+    if (!selectedTask || !window.confirm(`Delete "${selectedTask.name}"?`)) {
+      return;
+    }
+    setSaving(true);
+    try {
+      await deleteTask(selectedTask.task_id, currentUser.username);
+      setTasks(tasks.filter((task) => task.task_id !== selectedTask.task_id));
+      setSelectedTaskId(null);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -193,6 +209,9 @@ export function ProjectDashboard() {
                 </label>
                 <button type="submit" disabled={!editingName.trim() || saving}>
                   {saving ? "Saving" : "Save"}
+                </button>
+                <button type="button" disabled={saving} onClick={handleTaskDelete}>
+                  Delete
                 </button>
               </form>
             ) : (

@@ -391,6 +391,31 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["vector"]["provider"], "null")
 
+    def test_startup_health_reports_core_services(self) -> None:
+        response = self.client.get("/api/v1/health/startup")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["ready"])
+        self.assertIn("memory", response.json()["services"])
+
+    def test_data_management_endpoints_export_and_delete(self) -> None:
+        created = self.client.post(
+            "/api/v1/chat",
+            json={"message": "export this", "username": "data-user"},
+        ).json()
+        exported = self.client.get(
+            f"/api/v1/conversations/{created['conversation_id']}/export",
+            params={"username": "data-user"},
+        )
+        deleted = self.client.delete(
+            f"/api/v1/conversations/{created['conversation_id']}",
+            params={"username": "data-user"},
+        )
+
+        self.assertEqual(exported.status_code, 200)
+        self.assertEqual(len(exported.json()["messages"]), 2)
+        self.assertTrue(deleted.json()["deleted"])
+
     def test_model_load_endpoint_updates_loaded_model(self) -> None:
         response = self.client.post("/api/v1/models/load", json={"model_name": "echo-alt"})
 
