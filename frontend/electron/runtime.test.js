@@ -34,4 +34,28 @@ describe("Electron backend lifecycle", () => {
 
     await expect(controller.waitUntilReady(100)).resolves.toBe(true);
   });
+
+  it("restarts the backend after an unexpected exit", () => {
+    vi.useFakeTimers();
+    const processes = [];
+    const spawnProcess = vi.fn(() => {
+      const process = { killed: false, kill: vi.fn(), once: vi.fn() };
+      processes.push(process);
+      return process;
+    });
+    const controller = createBackendController({
+      backendUrl: "http://127.0.0.1:8123",
+      projectRoot: "/project",
+      spawnProcess,
+    });
+    controller.start();
+    const exitHandler = processes[0].once.mock.calls[0][1];
+
+    exitHandler();
+    vi.advanceTimersByTime(1000);
+
+    expect(spawnProcess).toHaveBeenCalledTimes(2);
+    controller.stop();
+    vi.useRealTimers();
+  });
 });

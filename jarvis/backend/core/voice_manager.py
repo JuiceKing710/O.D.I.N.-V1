@@ -86,6 +86,68 @@ class WhisperCommandSpeechToTextAdapter:
         return transcript
 
 
+class WhisperCliSpeechToTextAdapter:
+    name = "whisper-cli"
+
+    def __init__(self, executable: str, model_path: Path | str, ffmpeg_executable: str) -> None:
+        self.executable = executable
+        self.model_path = Path(model_path)
+        self.ffmpeg_executable = ffmpeg_executable
+
+    @property
+    def configured(self) -> bool:
+        return self.model_path.is_file() and self.model_path.stat().st_size > 1_000_000
+
+    def transcribe(self, audio_path: Path) -> str:
+        if not self.configured:
+            raise RuntimeError(f"Whisper model is missing or invalid: {self.model_path}")
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            wav_path = Path(temporary_dir) / "input.wav"
+            converted = subprocess.run(
+                [
+                    self.ffmpeg_executable,
+                    "-y",
+                    "-i",
+                    str(audio_path),
+                    "-ar",
+                    "16000",
+                    "-ac",
+                    "1",
+                    str(wav_path),
+                ],
+                capture_output=True,
+                check=False,
+                text=True,
+                timeout=120,
+            )
+            if converted.returncode != 0 or not wav_path.is_file():
+                raise RuntimeError(converted.stderr.strip() or "Audio conversion failed")
+            result = subprocess.run(
+                [
+                    self.executable,
+                    "-m",
+                    str(self.model_path),
+                    "-f",
+                    str(wav_path),
+                    "-np",
+                    "-nt",
+                    "-ng",
+                    "-l",
+                    "en",
+                ],
+                capture_output=True,
+                check=False,
+                text=True,
+                timeout=180,
+            )
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr.strip() or "Local Whisper transcription failed")
+        transcript = result.stdout.strip()
+        if not transcript:
+            raise RuntimeError("Local Whisper transcription returned no text")
+        return transcript
+
+
 class MacOSTextToSpeechAdapter:
     name = "macos-say"
     configured = True

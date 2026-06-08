@@ -11,6 +11,8 @@ export function createBackendController({
   spawnProcess = spawn,
 }) {
   let backendProcess = null;
+  let stopping = false;
+  let restartTimer = null;
   const parsedUrl = new URL(backendUrl);
   const port = parsedUrl.port || "8000";
 
@@ -23,7 +25,7 @@ export function createBackendController({
     if (backendProcess) {
       return backendProcess;
     }
-    backendProcess = spawnProcess(
+    const process = spawnProcess(
       pythonExecutable(),
       [
         "-m",
@@ -40,10 +42,20 @@ export function createBackendController({
         stdio: "inherit",
       },
     );
-    backendProcess.once("exit", () => {
+    backendProcess = process;
+    process.once("exit", () => {
+      if (backendProcess !== process) {
+        return;
+      }
       backendProcess = null;
+      if (!stopping && !restartTimer) {
+        restartTimer = setTimeout(() => {
+          restartTimer = null;
+          start();
+        }, 1000);
+      }
     });
-    return backendProcess;
+    return process;
   }
 
   async function waitUntilReady(timeoutMs = 20000) {
@@ -63,11 +75,25 @@ export function createBackendController({
   }
 
   function stop() {
+    stopping = true;
+    if (restartTimer) {
+      clearTimeout(restartTimer);
+      restartTimer = null;
+    }
     if (backendProcess && !backendProcess.killed) {
       backendProcess.kill("SIGTERM");
     }
     backendProcess = null;
   }
 
-  return { start, stop, waitUntilReady };
+  function restart() {
+    stopping = false;
+    if (backendProcess && !backendProcess.killed) {
+      backendProcess.kill("SIGTERM");
+      backendProcess = null;
+    }
+    return start();
+  }
+
+  return { restart, start, stop, waitUntilReady };
 }

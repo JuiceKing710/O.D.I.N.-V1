@@ -22,6 +22,23 @@ export function StartupHealth() {
     }
   }
 
+  async function restartBackend() {
+    setError("");
+    try {
+      if (!globalThis.jarvisDesktop?.restartBackend) {
+        throw new Error("Backend restart is available in the desktop app.");
+      }
+      await globalThis.jarvisDesktop.restartBackend();
+      await refresh();
+    } catch (requestError) {
+      setError(requestError.message);
+    }
+  }
+
+  async function openMicrophoneSettings() {
+    await globalThis.jarvisDesktop?.openMicrophoneSettings?.();
+  }
+
   useEffect(() => {
     refresh();
   }, []);
@@ -54,6 +71,16 @@ export function StartupHealth() {
       <button type="button" onClick={refresh}>
         Check again
       </button>
+      {error && globalThis.jarvisDesktop?.restartBackend && (
+        <button type="button" onClick={restartBackend}>
+          Restart backend
+        </button>
+      )}
+      {!error && health?.services?.voice && !health.services.voice.ok && (
+        <button type="button" onClick={openMicrophoneSettings}>
+          Microphone settings
+        </button>
+      )}
     </section>
   );
 }

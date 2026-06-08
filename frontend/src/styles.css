@@ -464,6 +464,22 @@ textarea {
   border-color: #62d6d2;
 }
 
+.microphone-level {
+  width: 72px;
+  height: 8px;
+  overflow: hidden;
+  background: #10141a;
+  border: 1px solid #2a3340;
+  border-radius: 999px;
+}
+
+.microphone-level span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #62d6d2, #f1c453);
+  transition: width 80ms linear;
+}
+
 .voice-pill {
   border: 1px solid #2a3340;
   border-radius: 999px;

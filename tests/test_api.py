@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from contextlib import closing
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -31,7 +32,7 @@ from jarvis.backend.core.memory_manager import MemoryManager
 from jarvis.backend.core.recovery_manager import RecoveryManager
 from jarvis.backend.core.settings_store import SettingsStore
 from jarvis.backend.core.vector_store import NullVectorStore
-from jarvis.backend.core.voice_manager import VoiceManager
+from jarvis.backend.core.voice_manager import VoiceManager, WhisperCliSpeechToTextAdapter
 from jarvis.backend.utils.audit_logging import AuditLogger
 from jarvis.backend.utils.permissions import Permission, PermissionDecision, PermissionManager
 
@@ -481,6 +482,34 @@ class ApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["transcript"], "uploaded transcript")
+
+    def test_voice_setup_downloads_local_whisper_model(self) -> None:
+        model_path = Path(self.tmp.name) / "models" / "ggml-base.en.bin"
+        self.voice.stt_adapter = WhisperCliSpeechToTextAdapter(
+            "whisper-cli",
+            model_path,
+            "ffmpeg",
+        )
+
+        class Download:
+            def __init__(self):
+                self.remaining = [b"x" * 1_000_001, b""]
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return None
+
+            def read(self, size):
+                return self.remaining.pop(0)
+
+        with patch("urllib.request.urlopen", return_value=Download()):
+            response = self.client.post("/api/v1/voice/setup")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["configured"])
+        self.assertTrue(model_path.is_file())
 
     def test_voice_state_update_emits_websocket_event(self) -> None:
         with self.client.websocket_connect("/api/v1/events") as websocket:

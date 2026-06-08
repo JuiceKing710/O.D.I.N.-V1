@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import secrets
+import shutil
 import threading
 from functools import lru_cache
 from pathlib import Path
@@ -26,6 +27,7 @@ from jarvis.backend.core.voice_manager import (
     UnconfiguredTextToSpeechAdapter,
     VoiceManager,
     WhisperCommandSpeechToTextAdapter,
+    WhisperCliSpeechToTextAdapter,
 )
 from jarvis.backend.utils.audit_logging import AuditLogger
 from jarvis.backend.utils.permissions import PermissionManager
@@ -136,11 +138,20 @@ def get_voice_manager() -> VoiceManager:
     voice_output_dir = Path(os.environ.get("JARVIS_VOICE_OUTPUT_DIR", "data/voice"))
     stt_command = os.environ.get("JARVIS_WHISPER_COMMAND")
     tts_command = os.environ.get("JARVIS_TTS_COMMAND")
-    stt_adapter = (
-        WhisperCommandSpeechToTextAdapter(stt_command)
-        if stt_command
-        else UnconfiguredSpeechToTextAdapter()
+    whisper_cli = shutil.which("whisper-cli")
+    ffmpeg = shutil.which("ffmpeg")
+    whisper_model = Path(
+        os.environ.get(
+            "JARVIS_WHISPER_MODEL",
+            str(Path.home() / "jarvis-models" / "ggml-base.en.bin"),
+        )
     )
+    if stt_command:
+        stt_adapter = WhisperCommandSpeechToTextAdapter(stt_command)
+    elif whisper_cli and ffmpeg:
+        stt_adapter = WhisperCliSpeechToTextAdapter(whisper_cli, whisper_model, ffmpeg)
+    else:
+        stt_adapter = UnconfiguredSpeechToTextAdapter()
     if tts_command:
         tts_adapter = CommandTextToSpeechAdapter(tts_command, voice_output_dir)
     elif MacOSTextToSpeechAdapter.available():

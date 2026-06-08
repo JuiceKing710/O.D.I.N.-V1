@@ -13,6 +13,7 @@ import {
   resolvePermissionRequest,
   restoreRecoveryBackup,
   synthesizeVoice,
+  setupVoiceModel,
 } from "../ipc/apiClient.js";
 import { useAppState } from "../state/appContext.jsx";
 
@@ -39,6 +40,7 @@ export function SettingsPanel() {
   const [themeDraft, setThemeDraft] = useState("system");
   const [voiceStatus, setVoiceStatus] = useState(null);
   const [voiceTesting, setVoiceTesting] = useState(false);
+  const [voiceSetupLoading, setVoiceSetupLoading] = useState(false);
   const [voiceModeDraft, setVoiceModeDraft] = useState("push_to_talk");
   const { refreshSettings, saveSettings, settings, settingsError, settingsLoading } =
     useAppState();
@@ -247,6 +249,21 @@ export function SettingsPanel() {
     }
   }
 
+  async function handleVoiceSetup() {
+    setVoiceSetupLoading(true);
+    setSaveNotice("");
+    setError("");
+    try {
+      const setup = await setupVoiceModel();
+      setVoiceStatus(await fetchVoiceStatus());
+      setSaveNotice(`Local speech model ready at ${setup.model_path}.`);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setVoiceSetupLoading(false);
+    }
+  }
+
   async function handleRecoveryCheck() {
     setRecoveryLoading(true);
     setSaveNotice("");
@@ -402,8 +419,14 @@ ollama pull llama3.2`}</pre>
             <div className="section-heading">
               <h2>Voice</h2>
               {voiceStatus && (
-                <span className={voiceStatus.tts_configured ? "status-ok" : "status-error"}>
-                  {voiceStatus.tts_configured ? "Ready" : "Offline"}
+                <span
+                  className={
+                    voiceStatus.stt_configured && voiceStatus.tts_configured
+                      ? "status-ok"
+                      : "status-error"
+                  }
+                >
+                  {voiceStatus.stt_configured && voiceStatus.tts_configured ? "Ready" : "Check"}
                 </span>
               )}
             </div>
@@ -417,6 +440,12 @@ ollama pull llama3.2`}</pre>
                     {voiceStatus.stt_adapter} ·{" "}
                     {voiceStatus.stt_configured ? "configured" : "not configured"}
                   </dd>
+                  {voiceStatus.stt_detail && (
+                    <>
+                      <dt>Speech model</dt>
+                      <dd>{voiceStatus.stt_detail}</dd>
+                    </>
+                  )}
                   <dt>Text to speech</dt>
                   <dd>
                     {voiceStatus.tts_adapter} ·{" "}
@@ -431,6 +460,16 @@ ollama pull llama3.2`}</pre>
                 >
                   {voiceTesting ? "Testing" : "Test"}
                 </button>
+                {!voiceStatus.stt_configured && voiceStatus.stt_adapter === "whisper-cli" && (
+                  <button
+                    className="settings-action"
+                    type="button"
+                    disabled={voiceSetupLoading}
+                    onClick={handleVoiceSetup}
+                  >
+                    {voiceSetupLoading ? "Downloading model" : "Set up local speech model"}
+                  </button>
+                )}
               </>
             ) : (
               <div className="empty-state">Voice status unavailable.</div>

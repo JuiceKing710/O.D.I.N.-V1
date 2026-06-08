@@ -1,5 +1,4 @@
 import React, { useEffect, useRef, useState } from "react";
-import { useSpeechRecognition } from "../hooks/useSpeechRecognition.js";
 import { useSpeechSynthesis } from "../hooks/useSpeechSynthesis.js";
 import {
   createReflection,
@@ -39,7 +38,15 @@ export function ChatView({ onOpenCoreFocus }) {
   const [backendRecording, setBackendRecording] = useState(false);
   const [backendSpeaking, setBackendSpeaking] = useState(false);
   const [backendVoiceAvailable, setBackendVoiceAvailable] = useState(false);
+  const [microphoneDevices, setMicrophoneDevices] = useState([]);
+  const [microphoneLevel, setMicrophoneLevel] = useState(0);
+  const [selectedMicrophone, setSelectedMicrophone] = useState("");
   const audioRef = useRef(null);
+  const audioContextRef = useRef(null);
+  const automaticListeningRef = useRef(false);
+  const automaticRecordingRef = useRef(false);
+  const automaticStopTimerRef = useRef(null);
+  const microphoneFrameRef = useRef(null);
   const inputRef = useRef(null);
   const mediaRecorderRef = useRef(null);
   const mediaStreamRef = useRef(null);
@@ -60,15 +67,6 @@ export function ChatView({ onOpenCoreFocus }) {
     onEnd: () => {
       setSpeakingMessageId("");
       setVoiceState("idle");
-    },
-  });
-  const recognition = useSpeechRecognition({
-    continuous: voiceMode === "always_listening",
-    onStart: () => setVoiceState("listening"),
-    onEnd: () => setVoiceState("idle"),
-    onResult: (text) => {
-      setInput(text);
-      void sendMessage(text);
     },
   });
   const provider = providerStatus.provider;
@@ -139,17 +137,34 @@ export function ChatView({ onOpenCoreFocus }) {
     if (voiceDisabled) {
       setVoiceEnabled(false);
       stopSpeech();
-      recognition.stop();
+      automaticListeningRef.current = false;
+      clearTimeout(automaticStopTimerRef.current);
+      mediaRecorderRef.current?.stop();
     } else {
       setVoiceEnabled(true);
     }
   }, [voiceDisabled]);
 
   useEffect(() => {
-    if (voiceMode === "always_listening" && recognition.available && !recognition.listening) {
-      recognition.start();
+    automaticListeningRef.current = voiceMode === "always_listening";
+    if (automaticListeningRef.current && !backendRecording) {
+      void toggleMicrophone(true);
+    } else if (!automaticListeningRef.current && automaticRecordingRef.current) {
+      clearTimeout(automaticStopTimerRef.current);
+      mediaRecorderRef.current?.stop();
     }
   }, [voiceMode]);
+
+  useEffect(() => {
+    return () => {
+      automaticListeningRef.current = false;
+      clearTimeout(automaticStopTimerRef.current);
+      mediaRecorderRef.current?.stop();
+      mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+      cancelAnimationFrame(microphoneFrameRef.current);
+      audioContextRef.current?.close();
+    };
+  }, []);
 
   useEffect(() => {
     if (isPinnedToLatest) {
@@ -311,7 +326,46 @@ export function ChatView({ onOpenCoreFocus }) {
     return btoa(binary);
   }
 
-  async function toggleBackendRecording() {
+  function stopMicrophoneLevel() {
+    cancelAnimationFrame(microphoneFrameRef.current);
+    microphoneFrameRef.current = null;
+    audioContextRef.current?.close();
+    audioContextRef.current = null;
+    setMicrophoneLevel(0);
+  }
+
+  function monitorMicrophoneLevel(stream) {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) {
+      return;
+    }
+    const context = new AudioContext();
+    const analyser = context.createAnalyser();
+    const source = context.createMediaStreamSource(stream);
+    const samples = new Uint8Array(analyser.frequencyBinCount);
+    source.connect(analyser);
+    audioContextRef.current = context;
+    const update = () => {
+      analyser.getByteFrequencyData(samples);
+      const average = samples.reduce((total, sample) => total + sample, 0) / samples.length;
+      setMicrophoneLevel(Math.min(Math.round((average / 128) * 100), 100));
+      microphoneFrameRef.current = requestAnimationFrame(update);
+    };
+    update();
+  }
+
+  async function refreshMicrophones() {
+    if (!navigator.mediaDevices?.enumerateDevices) {
+      return;
+    }
+    const devices = (await navigator.mediaDevices.enumerateDevices()).filter(
+      (device) => device.kind === "audioinput",
+    );
+    setMicrophoneDevices(devices);
+    setSelectedMicrophone((current) => current || devices[0]?.deviceId || "");
+  }
+
+  async function toggleMicrophone(automatic = false) {
     if (backendRecording) {
       mediaRecorderRef.current?.stop();
       return;
@@ -321,7 +375,15 @@ export function ChatView({ onOpenCoreFocus }) {
       return;
     }
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (globalThis.jarvisDesktop?.requestMicrophone) {
+        const allowed = await globalThis.jarvisDesktop.requestMicrophone();
+        if (!allowed) {
+          throw new DOMException("Microphone access was denied.", "NotAllowedError");
+        }
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: selectedMicrophone ? { deviceId: { exact: selectedMicrophone } } : true,
+      });
       const chunks = [];
       const recorder = new MediaRecorder(stream);
       mediaStreamRef.current = stream;
@@ -332,8 +394,11 @@ export function ChatView({ onOpenCoreFocus }) {
         }
       };
       recorder.onstop = async () => {
+        const shouldRestart = automaticListeningRef.current && automaticRecordingRef.current;
+        automaticRecordingRef.current = false;
         setBackendRecording(false);
         stream.getTracks().forEach((track) => track.stop());
+        stopMicrophoneLevel();
         setVoiceState("thinking");
         try {
           const blob = new Blob(chunks, { type: recorder.mimeType });
@@ -347,11 +412,23 @@ export function ChatView({ onOpenCoreFocus }) {
           setInput(response.transcript);
           await sendMessage(response.transcript);
         } catch (error) {
-          setVoiceNotice(error.message);
+          if (!shouldRestart) {
+            setVoiceNotice(error.message);
+          }
           setVoiceState("idle");
+        } finally {
+          if (shouldRestart) {
+            window.setTimeout(() => void toggleMicrophone(true), 300);
+          }
         }
       };
       recorder.start();
+      automaticRecordingRef.current = automatic;
+      if (automatic) {
+        automaticStopTimerRef.current = window.setTimeout(() => recorder.stop(), 8000);
+      }
+      monitorMicrophoneLevel(stream);
+      await refreshMicrophones();
       setBackendRecording(true);
       setVoiceState("listening");
       setVoiceNotice("");
@@ -464,24 +541,34 @@ export function ChatView({ onOpenCoreFocus }) {
             Stop
           </button>
           <button
-            className={recognition.listening ? "toggle active" : "toggle"}
-            type="button"
-            onClick={() => {
-              speech.warmUp();
-              recognition.toggle();
-            }}
-            disabled={voiceDisabled || !recognition.available}
-          >
-            {recognition.listening ? "Listening" : "Mic"}
-          </button>
-          <button
             className={backendRecording ? "toggle active" : "toggle"}
             type="button"
-            onClick={toggleBackendRecording}
+            onClick={() => toggleMicrophone(false)}
             disabled={voiceDisabled}
           >
-            {backendRecording ? "Transcribe" : "Backend Mic"}
+            {backendRecording ? "Send Voice" : "Mic"}
           </button>
+          {microphoneDevices.length > 1 && (
+            <select
+              aria-label="Microphone"
+              disabled={backendRecording}
+              value={selectedMicrophone}
+              onChange={(event) => setSelectedMicrophone(event.target.value)}
+            >
+              {microphoneDevices.map((device, index) => (
+                <option key={device.deviceId} value={device.deviceId}>
+                  {device.label || `Microphone ${index + 1}`}
+                </option>
+              ))}
+            </select>
+          )}
+          <span
+            className="microphone-level"
+            aria-label={`Microphone level ${microphoneLevel}%`}
+            title={`Microphone level ${microphoneLevel}%`}
+          >
+            <span style={{ width: `${microphoneLevel}%` }} />
+          </span>
           <button
             type="button"
             onClick={() => {
@@ -506,14 +593,7 @@ export function ChatView({ onOpenCoreFocus }) {
       {!providerStatus.loading && !providerAvailable && (
         <p className="error provider-notice">{providerMessage}</p>
       )}
-      {recognition.error && <p className="voice-notice">{recognition.error}</p>}
       {conversationError && <p className="error provider-notice">{conversationError}</p>}
-      {recognition.transcript && (
-        <div className="dictation-preview">
-          <span>Heard</span>
-          <p>{recognition.transcript}</p>
-        </div>
-      )}
       <section className="conversation-history" aria-label="Conversation history">
         <div className="conversation-history-heading">
           <h2>History</h2>

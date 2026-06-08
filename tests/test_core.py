@@ -6,6 +6,7 @@ import sqlite3
 import tempfile
 import unittest
 import urllib.error
+import zipfile
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -28,6 +29,7 @@ from jarvis.backend.core.vector_store import InMemoryVectorStore, NullVectorStor
 from jarvis.backend.core.voice_manager import (
     InterruptionConfig,
     MacOSTextToSpeechAdapter,
+    WhisperCliSpeechToTextAdapter,
     VoiceManager,
     VoiceState,
 )
@@ -372,6 +374,51 @@ class CoreTests(unittest.TestCase):
         self.assertIn("before", audit_path.read_text(encoding="utf-8"))
         self.assertEqual((vector_path / "index.bin").read_bytes(), b"vector-before")
 
+    def test_backup_restore_rejects_bundle_checksum_failure(self) -> None:
+        base = Path(self.tmp.name) / "checksum"
+        db_path = base / "jarvis.db"
+        MemoryManager(db_path)
+        recovery = RecoveryManager(
+            db_path,
+            base / "backups",
+            NullVectorStore(),
+            encryption_key="bundle-key",
+        )
+        snapshot = recovery.create_sqlite_backup()
+        archive = base / "tampered.zip"
+        archive.write_bytes(recovery._decrypt(snapshot.path.read_bytes()))
+        tampered = base / "tampered-rebuilt.zip"
+        with zipfile.ZipFile(archive) as source, zipfile.ZipFile(tampered, "w") as target:
+            for name in source.namelist():
+                content = b"tampered" if name == "database/jarvis.db" else source.read(name)
+                target.writestr(name, content)
+        snapshot.path.write_bytes(recovery._encrypt(tampered.read_bytes()))
+
+        with self.assertRaisesRegex(ValueError, "checksum failed"):
+            recovery.restore_sqlite_backup(snapshot.path.name)
+
+    def test_backup_restore_rolls_back_database_after_optional_file_failure(self) -> None:
+        base = Path(self.tmp.name) / "rollback"
+        db_path = base / "jarvis.db"
+        memory = MemoryManager(db_path)
+        memory.get_or_create_user("before")
+        recovery = RecoveryManager(
+            db_path,
+            base / "backups",
+            NullVectorStore(),
+            encryption_key="bundle-key",
+        )
+        snapshot = recovery.create_sqlite_backup()
+        memory.get_or_create_user("current")
+
+        with patch.object(recovery, "_restore_optional_bundle_files", side_effect=OSError("failed")):
+            with self.assertRaisesRegex(OSError, "failed"):
+                recovery.restore_sqlite_backup(snapshot.path.name)
+
+        with sqlite3.connect(db_path) as connection:
+            users = {row[0] for row in connection.execute("SELECT username FROM users")}
+        self.assertIn("current", users)
+
     def test_lm_provider_loads_selected_model(self) -> None:
         provider = EchoLMProvider()
 
@@ -440,6 +487,24 @@ class CoreTests(unittest.TestCase):
 
         self.assertEqual(transcript, "hello from audio")
         self.assertEqual(voice.state, VoiceState.IDLE)
+
+    def test_whisper_cli_converts_audio_and_returns_transcript(self) -> None:
+        audio = Path(self.tmp.name) / "input.webm"
+        model = Path(self.tmp.name) / "model.bin"
+        audio.write_bytes(b"audio")
+        model.write_bytes(b"model" + b"\0" * 1_000_000)
+        adapter = WhisperCliSpeechToTextAdapter("whisper-cli", model, "ffmpeg")
+
+        def fake_run(command, **kwargs):
+            if command[0] == "ffmpeg":
+                Path(command[-1]).write_bytes(b"wav")
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+            return SimpleNamespace(returncode=0, stdout="hello from whisper", stderr="")
+
+        with patch("subprocess.run", side_effect=fake_run):
+            transcript = adapter.transcribe(audio)
+
+        self.assertEqual(transcript, "hello from whisper")
 
     def test_macos_voice_output_is_converted_to_wav(self) -> None:
         output_dir = Path(self.tmp.name) / "voice"

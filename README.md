@@ -17,8 +17,9 @@ The current build includes:
 - Electron desktop wrapper around the built React app.
 - Unit and API tests for core message handling, persistence, bot dispatch, permissions, CORS, tasks, and settings.
 
-Ollama is the default local LLM provider. ChromaDB, command-based Whisper transcription,
-and command-based TTS can be enabled through environment configuration.
+Ollama is the default local LLM provider. ChromaDB and command-based TTS can be enabled through
+environment configuration. Jarvis automatically uses local `whisper-cli` and the configured
+Whisper model for speech input when available.
 
 ## Backend
 
@@ -58,6 +59,10 @@ transcript to stdout or create the requested output file:
 export JARVIS_WHISPER_COMMAND='whisper-cli {audio_path}'
 export JARVIS_TTS_COMMAND='tts-cli --text {text} --output {output_path}'
 ```
+
+Jarvis defaults to `~/jarvis-models/ggml-base.en.bin` for local Whisper input. Override it with
+`JARVIS_WHISPER_MODEL`, or use Settings → Voice → Set up local speech model to download a
+compatible model. The Electron app requests macOS microphone access on first use.
 
 Jarvis recognizes explicit natural-language actions such as `research local assistants`,
 `analyze code path/to/file.py`, `read file notes.txt`, and `run command date`. Slash commands

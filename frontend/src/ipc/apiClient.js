@@ -51,6 +51,10 @@ export function fetchVoiceStatus() {
   return request("/api/v1/voice/status");
 }
 
+export function setupVoiceModel() {
+  return request("/api/v1/voice/setup", { method: "POST" });
+}
+
 export function transcribeVoiceAudio({ audioBase64, audioSuffix = ".webm" }) {
   return request("/api/v1/voice/transcribe", {
     method: "POST",

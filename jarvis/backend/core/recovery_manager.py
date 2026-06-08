@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import hashlib
 import json
 import shutil
 import sqlite3
@@ -159,16 +160,21 @@ class RecoveryManager:
                 if bundle:
                     archive_path = staging / "backup.zip"
                     archive_path.write_bytes(plaintext)
-                    with zipfile.ZipFile(archive_path) as archive:
-                        archive.extractall(staging / "bundle")
+                    self._extract_validated_bundle(archive_path, staging / "bundle")
                     temporary_path = staging / "bundle" / "database" / "jarvis.db"
                 else:
                     temporary_path.write_bytes(plaintext)
                 self._validate_sqlite(temporary_path)
                 safety_backup = self.create_sqlite_backup() if self.db_path.exists() else None
-                os.replace(temporary_path, self.db_path)
-                if bundle:
-                    self._restore_optional_bundle_files(staging / "bundle")
+                rollback = staging / "rollback"
+                self._stage_current_state(rollback)
+                try:
+                    os.replace(temporary_path, self.db_path)
+                    if bundle:
+                        self._restore_optional_bundle_files(staging / "bundle")
+                except Exception:
+                    self._restore_staged_state(rollback)
+                    raise
             return RestoreSnapshot(
                 path=self.db_path,
                 restored_from=source,
@@ -183,29 +189,102 @@ class RecoveryManager:
         database_snapshot: Path,
         created_at: datetime,
     ) -> None:
+        entries: dict[str, bytes] = {
+            "database/jarvis.db": database_snapshot.read_bytes(),
+        }
+        for source, name in (
+            (self.settings_path, "settings/settings.json"),
+            (self.audit_log_path, "audit/audit.log"),
+        ):
+            if source and source.is_file():
+                entries[name] = source.read_bytes()
+        if self.vector_path and self.vector_path.is_dir():
+            for path in self.vector_path.rglob("*"):
+                if path.is_file():
+                    entries[str(Path("vector") / path.relative_to(self.vector_path))] = path.read_bytes()
+        manifest = {
+            "format": 2,
+            "created_at": created_at.isoformat(),
+            "checksums": {
+                name: hashlib.sha256(content).hexdigest() for name, content in entries.items()
+            },
+        }
         with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-            archive.write(database_snapshot, "database/jarvis.db")
-            archive.writestr(
-                "manifest.json",
-                json.dumps(
-                    {
-                        "format": 2,
-                        "created_at": created_at.isoformat(),
-                        "includes": ["database", "settings", "audit", "vector"],
-                    },
-                    sort_keys=True,
-                ),
-            )
-            for source, name in (
-                (self.settings_path, "settings/settings.json"),
-                (self.audit_log_path, "audit/audit.log"),
-            ):
-                if source and source.is_file():
-                    archive.write(source, name)
-            if self.vector_path and self.vector_path.is_dir():
-                for path in self.vector_path.rglob("*"):
-                    if path.is_file():
-                        archive.write(path, Path("vector") / path.relative_to(self.vector_path))
+            archive.writestr("manifest.json", json.dumps(manifest, sort_keys=True))
+            for name, content in entries.items():
+                archive.writestr(name, content)
+
+    @staticmethod
+    def _extract_validated_bundle(archive_path: Path, target: Path) -> None:
+        with zipfile.ZipFile(archive_path) as archive:
+            try:
+                manifest = json.loads(archive.read("manifest.json"))
+                checksums = manifest["checksums"]
+            except (KeyError, json.JSONDecodeError) as exc:
+                raise ValueError("Backup manifest is missing or invalid") from exc
+            if manifest.get("format") != 2 or not isinstance(checksums, dict):
+                raise ValueError("Unsupported backup bundle format")
+            target.mkdir(parents=True, exist_ok=True)
+            for name, expected_checksum in checksums.items():
+                relative = Path(name)
+                if relative.is_absolute() or ".." in relative.parts:
+                    raise ValueError(f"Unsafe backup bundle path: {name}")
+                try:
+                    content = archive.read(name)
+                except KeyError as exc:
+                    raise ValueError(f"Backup bundle is missing: {name}") from exc
+                if hashlib.sha256(content).hexdigest() != expected_checksum:
+                    raise ValueError(f"Backup bundle checksum failed: {name}")
+                destination = target / relative
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_bytes(content)
+            if "database/jarvis.db" not in checksums:
+                raise ValueError("Backup bundle does not contain a database")
+
+    def _stage_current_state(self, target: Path) -> None:
+        target.mkdir(parents=True, exist_ok=True)
+        state = {
+            "database": self.db_path.is_file(),
+            "settings": bool(self.settings_path and self.settings_path.is_file()),
+            "audit": bool(self.audit_log_path and self.audit_log_path.is_file()),
+            "vector": bool(self.vector_path and self.vector_path.is_dir()),
+        }
+        (target / "state.json").write_text(json.dumps(state), encoding="utf-8")
+        for source, name in (
+            (self.db_path, "database/jarvis.db"),
+            (self.settings_path, "settings/settings.json"),
+            (self.audit_log_path, "audit/audit.log"),
+        ):
+            if source and source.is_file():
+                destination = target / name
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source, destination)
+        if self.vector_path and self.vector_path.is_dir():
+            shutil.copytree(self.vector_path, target / "vector")
+
+    def _restore_staged_state(self, staged: Path) -> None:
+        state = json.loads((staged / "state.json").read_text(encoding="utf-8"))
+        database = staged / "database" / "jarvis.db"
+        if state["database"]:
+            shutil.copy2(database, self.db_path)
+        else:
+            self.db_path.unlink(missing_ok=True)
+        for source, target in (
+            (staged / "settings" / "settings.json", self.settings_path),
+            (staged / "audit" / "audit.log", self.audit_log_path),
+        ):
+            if target:
+                key = "settings" if target == self.settings_path else "audit"
+                if state[key]:
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(source, target)
+                else:
+                    target.unlink(missing_ok=True)
+        source_vector = staged / "vector"
+        if self.vector_path:
+            shutil.rmtree(self.vector_path, ignore_errors=True)
+            if state["vector"]:
+                shutil.copytree(source_vector, self.vector_path)
 
     def _restore_optional_bundle_files(self, bundle_path: Path) -> None:
         for source, target in (

@@ -191,6 +191,7 @@ class VoiceStatusResponse(BaseModel):
     stt_configured: bool
     tts_adapter: str
     tts_configured: bool
+    stt_detail: str | None = None
 
 
 class VoiceTranscribeRequest(BaseModel):
@@ -202,6 +203,11 @@ class VoiceTranscribeRequest(BaseModel):
 class VoiceTranscribeResponse(BaseModel):
     transcript: str
     state: Literal["idle", "listening", "thinking", "speaking"]
+
+
+class VoiceSetupResponse(BaseModel):
+    configured: bool
+    model_path: str
 
 
 class VoiceSynthesizeRequest(BaseModel):

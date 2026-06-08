@@ -3,6 +3,10 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
+import os
+import tempfile
+import urllib.error
+import urllib.request
 from dataclasses import asdict
 from pathlib import Path
 
@@ -46,6 +50,7 @@ from jarvis.backend.api.models import (
     VoiceStatusResponse,
     VoiceSynthesizeRequest,
     VoiceSynthesizeResponse,
+    VoiceSetupResponse,
     VoiceTranscribeRequest,
     VoiceTranscribeResponse,
 )
@@ -71,6 +76,9 @@ from jarvis.backend.utils.audit_logging import AuditLogger
 from jarvis.backend.utils.permissions import PermissionDecision, PermissionManager
 
 router = APIRouter(prefix="/api/v1")
+WHISPER_MODEL_URL = (
+    "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin"
+)
 
 
 def _settings_response(
@@ -100,8 +108,13 @@ async def startup_health(
             "detail": provider.selected_model or provider.error or provider.provider,
         },
         "voice": {
-            "ok": voice.tts_configured,
-            "detail": f"STT: {voice.stt_adapter}; TTS: {voice.tts_adapter}",
+            "ok": voice.stt_configured and voice.tts_configured,
+            "detail": {
+                "stt_adapter": voice.stt_adapter,
+                "stt_configured": voice.stt_configured,
+                "tts_adapter": voice.tts_adapter,
+                "tts_configured": voice.tts_configured,
+            },
         },
         "memory": {"ok": recovery.sqlite_ok, "detail": core.memory.vector_store.health()},
         "backups": {
@@ -516,7 +529,37 @@ def voice_status(voice_manager: VoiceManager = Depends(get_voice_manager)) -> Vo
         stt_configured=status.stt_configured,
         tts_adapter=status.tts_adapter,
         tts_configured=status.tts_configured,
+        stt_detail=(
+            str(voice_manager.stt_adapter.model_path)
+            if getattr(voice_manager.stt_adapter, "model_path", None)
+            else None
+        ),
     )
+
+
+@router.post("/voice/setup", response_model=VoiceSetupResponse)
+def setup_voice_model(voice_manager: VoiceManager = Depends(get_voice_manager)) -> VoiceSetupResponse:
+    model_path = getattr(voice_manager.stt_adapter, "model_path", None)
+    if model_path is None:
+        raise HTTPException(status_code=503, detail="Local whisper-cli is not installed")
+    model_path = Path(model_path)
+    model_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=model_path.parent, delete=False) as handle:
+            temporary_path = Path(handle.name)
+            with urllib.request.urlopen(WHISPER_MODEL_URL, timeout=300) as response:
+                while chunk := response.read(1024 * 1024):
+                    handle.write(chunk)
+        if temporary_path.stat().st_size <= 1_000_000:
+            raise RuntimeError("Downloaded Whisper model is invalid")
+        os.replace(temporary_path, model_path)
+    except (OSError, RuntimeError, urllib.error.URLError) as exc:
+        raise HTTPException(status_code=503, detail=f"Whisper model setup failed: {exc}") from exc
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+    return VoiceSetupResponse(configured=True, model_path=str(model_path))
 
 
 @router.post("/voice/state", response_model=VoiceStatusResponse)

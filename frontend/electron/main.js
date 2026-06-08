@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell } from "electron";
+import { app, BrowserWindow, ipcMain, session, shell, systemPreferences } from "electron";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { createBackendController } from "./runtime.js";
@@ -38,6 +38,36 @@ async function createWindow() {
 }
 
 app.whenReady().then(() => {
+  session.defaultSession.setPermissionCheckHandler((_webContents, permission, _origin, details) => {
+    return permission === "media" && details.mediaType === "audio";
+  });
+  session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback, details) => {
+    const microphoneOnly =
+      permission === "media" &&
+      Array.isArray(details.mediaTypes) &&
+      details.mediaTypes.includes("audio") &&
+      !details.mediaTypes.includes("video");
+    callback(microphoneOnly);
+  });
+  ipcMain.handle("jarvis:microphone-status", () =>
+    process.platform === "darwin"
+      ? systemPreferences.getMediaAccessStatus("microphone")
+      : "unknown",
+  );
+  ipcMain.handle("jarvis:request-microphone", async () =>
+    process.platform === "darwin"
+      ? systemPreferences.askForMediaAccess("microphone")
+      : true,
+  );
+  ipcMain.handle("jarvis:open-microphone-settings", () =>
+    shell.openExternal(
+      "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone",
+    ),
+  );
+  ipcMain.handle("jarvis:restart-backend", async () => {
+    backend.restart();
+    return backend.waitUntilReady();
+  });
   backend.start();
   createWindow();
 
