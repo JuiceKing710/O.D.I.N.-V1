@@ -25,6 +25,7 @@ export function AICore({ mode = "compact", state }) {
         ))}
       </div>
       <div className="core-orb" />
+      <span className="core-monogram">J</span>
       <span className="core-state">{state}</span>
     </section>
   );

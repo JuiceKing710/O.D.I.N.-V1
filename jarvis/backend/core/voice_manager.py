@@ -102,14 +102,28 @@ class MacOSTextToSpeechAdapter:
         if not cleaned:
             raise RuntimeError("Text is required for speech synthesis")
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        target = self.output_dir / f"jarvis-{uuid.uuid4().hex}.aiff"
-        command = ["say", "-o", str(target)]
+        identifier = uuid.uuid4().hex
+        source = self.output_dir / f"jarvis-{identifier}.aiff"
+        target = self.output_dir / f"jarvis-{identifier}.wav"
+        command = ["say", "-o", str(source)]
         if voice_name:
             command.extend(["-v", voice_name])
         command.append(cleaned)
         result = subprocess.run(command, capture_output=True, check=False, text=True, timeout=120)
         if result.returncode != 0:
             raise RuntimeError(result.stderr.strip() or "macOS speech synthesis failed")
+        try:
+            result = subprocess.run(
+                ["afconvert", "-f", "WAVE", "-d", "LEI16", str(source), str(target)],
+                capture_output=True,
+                check=False,
+                text=True,
+                timeout=120,
+            )
+        finally:
+            source.unlink(missing_ok=True)
+        if result.returncode != 0 or not target.is_file():
+            raise RuntimeError(result.stderr.strip() or "macOS audio conversion failed")
         return target
 
 

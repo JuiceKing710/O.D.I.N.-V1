@@ -7,7 +7,10 @@ import {
   fetchConversations,
   fetchModels,
   fetchReflections,
+  fetchVoiceStatus,
+  resolveApiUrl,
   sendChatMessage,
+  synthesizeVoice,
   transcribeVoiceAudio,
 } from "../ipc/apiClient.js";
 import { useAppState } from "../state/appContext.jsx";
@@ -34,6 +37,9 @@ export function ChatView({ onOpenCoreFocus }) {
   const [reflections, setReflections] = useState([]);
   const [reflectionLoading, setReflectionLoading] = useState(false);
   const [backendRecording, setBackendRecording] = useState(false);
+  const [backendSpeaking, setBackendSpeaking] = useState(false);
+  const [backendVoiceAvailable, setBackendVoiceAvailable] = useState(false);
+  const audioRef = useRef(null);
   const inputRef = useRef(null);
   const mediaRecorderRef = useRef(null);
   const mediaStreamRef = useRef(null);
@@ -109,6 +115,17 @@ export function ChatView({ onOpenCoreFocus }) {
           });
         }
       });
+    fetchVoiceStatus()
+      .then((status) => {
+        if (!cancelled) {
+          setBackendVoiceAvailable(status.tts_configured);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setBackendVoiceAvailable(false);
+        }
+      });
     return () => {
       cancelled = true;
     };
@@ -166,20 +183,66 @@ export function ChatView({ onOpenCoreFocus }) {
     });
   }
 
-  function speakMessage(message) {
+  async function speakMessage(message) {
     if (!message?.content) {
       return;
     }
-    if (!speech.available) {
-      setVoiceNotice("Browser speech is unavailable. Try Chrome or check macOS voice settings.");
-      return;
-    }
+    stopSpeech();
     setSpeakingMessageId(message.id || "");
     setVoiceNotice("");
-    speech.speak(message.content);
+    if (backendVoiceAvailable) {
+      try {
+        setVoiceState("speaking");
+        const response = await synthesizeVoice({ text: message.content });
+        const audio = new Audio(resolveApiUrl(response.audio_url));
+        audioRef.current = audio;
+        setBackendSpeaking(true);
+        audio.onended = () => {
+          audioRef.current = null;
+          setBackendSpeaking(false);
+          setSpeakingMessageId("");
+          setVoiceState("idle");
+        };
+        audio.onerror = () => {
+          audioRef.current = null;
+          setBackendSpeaking(false);
+          setVoiceState("idle");
+          if (speech.available) {
+            setVoiceNotice("Backend audio playback failed. Using browser voice instead.");
+            speech.speak(message.content);
+          } else {
+            setSpeakingMessageId("");
+            setVoiceNotice("Jarvis created the voice response, but audio playback failed.");
+          }
+        };
+        await audio.play();
+        return;
+      } catch (error) {
+        audioRef.current = null;
+        setBackendSpeaking(false);
+        setVoiceState("idle");
+        if (!speech.available) {
+          setSpeakingMessageId("");
+          setVoiceNotice(`Voice playback failed: ${error.message}`);
+          return;
+        }
+      }
+    }
+    if (speech.available) {
+      speech.speak(message.content);
+      return;
+    }
+    setSpeakingMessageId("");
+    setVoiceNotice("Speech output is unavailable. Check Backend Voice in Settings.");
   }
 
   function stopSpeech() {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+      audioRef.current = null;
+    }
+    setBackendSpeaking(false);
     speech.stop();
     setSpeakingMessageId("");
     setVoiceState("idle");
@@ -328,8 +391,8 @@ export function ChatView({ onOpenCoreFocus }) {
         content: response.reply,
       };
       addMessage(assistantMessage);
-      if (voiceEnabled && speech.available) {
-        speakMessage(assistantMessage);
+      if (voiceEnabled && (backendVoiceAvailable || speech.available)) {
+        await speakMessage(assistantMessage);
       } else {
         setVoiceState("idle");
       }
@@ -355,8 +418,14 @@ export function ChatView({ onOpenCoreFocus }) {
             Conversation {conversationId ? `#${conversationId}` : "New"}
           </p>
           <p>
-            Voice {voiceDisabled ? "disabled" : speech.available ? "ready" : "unavailable"}{" "}
-            {speech.voiceName ? `with ${speech.voiceName}` : ""}
+            Voice{" "}
+            {voiceDisabled
+              ? "disabled"
+              : backendVoiceAvailable
+                ? "ready through backend"
+                : speech.available
+                  ? "ready in browser"
+                  : "unavailable"}
           </p>
           <div className="runtime-status" aria-label="Runtime status">
             <span className={`status-light ${providerState}`} />
@@ -387,7 +456,7 @@ export function ChatView({ onOpenCoreFocus }) {
           >
             Voice
           </button>
-          <button type="button" onClick={stopSpeech} disabled={!speech.speaking}>
+          <button type="button" onClick={stopSpeech} disabled={!speech.speaking && !backendSpeaking}>
             Stop
           </button>
           <button
@@ -419,7 +488,7 @@ export function ChatView({ onOpenCoreFocus }) {
                 content: "Jarvis voice test. If you can hear this, speech output is working.",
               });
             }}
-            disabled={voiceDisabled || !speech.available}
+            disabled={voiceDisabled || (!backendVoiceAvailable && !speech.available)}
           >
             Test Voice
           </button>
@@ -508,9 +577,11 @@ export function ChatView({ onOpenCoreFocus }) {
                     onClick={() =>
                       speakingMessageId === message.id ? stopSpeech() : speakMessage(message)
                     }
-                    disabled={voiceDisabled || !speech.available}
+                    disabled={voiceDisabled || (!backendVoiceAvailable && !speech.available)}
                   >
-                    {speakingMessageId === message.id && speech.speaking ? "Stop" : "Speak"}
+                    {speakingMessageId === message.id && (speech.speaking || backendSpeaking)
+                      ? "Stop"
+                      : "Speak"}
                   </button>
                 )}
               </div>

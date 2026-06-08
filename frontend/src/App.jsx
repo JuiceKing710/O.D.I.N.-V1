@@ -44,6 +44,13 @@ function App() {
   return (
     <main className="app-shell">
       <aside className="sidebar" aria-label="Jarvis navigation">
+        <div className="brand-lockup">
+          <span className="brand-mark">J</span>
+          <div>
+            <strong>Jarvis</strong>
+            <small>Personal Intelligence</small>
+          </div>
+        </div>
         <AICore state={voiceState} />
         <nav className="tabs" aria-label="Primary">
           {PANELS.map((panel) => (

@@ -7,6 +7,7 @@ import unittest
 import urllib.error
 from datetime import datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
@@ -23,7 +24,12 @@ from jarvis.backend.core.lm_provider import EchoLMProvider, OllamaProvider
 from jarvis.backend.core.memory_manager import MemoryManager
 from jarvis.backend.core.recovery_manager import RecoveryManager
 from jarvis.backend.core.vector_store import InMemoryVectorStore, NullVectorStore, VectorStoreInterface
-from jarvis.backend.core.voice_manager import InterruptionConfig, VoiceManager, VoiceState
+from jarvis.backend.core.voice_manager import (
+    InterruptionConfig,
+    MacOSTextToSpeechAdapter,
+    VoiceManager,
+    VoiceState,
+)
 from jarvis.backend.utils.audit_logging import AuditLogger
 from jarvis.backend.utils.permissions import (
     Permission,
@@ -364,6 +370,22 @@ class CoreTests(unittest.TestCase):
 
         self.assertEqual(transcript, "hello from audio")
         self.assertEqual(voice.state, VoiceState.IDLE)
+
+    def test_macos_voice_output_is_converted_to_wav(self) -> None:
+        output_dir = Path(self.tmp.name) / "voice"
+        adapter = MacOSTextToSpeechAdapter(output_dir)
+
+        def fake_run(command, **kwargs):
+            output_path = Path(command[2] if command[0] == "say" else command[-1])
+            output_path.write_bytes(command[0].encode("utf-8"))
+            return SimpleNamespace(returncode=0, stderr="")
+
+        with patch("subprocess.run", side_effect=fake_run):
+            result = adapter.synthesize("hello")
+
+        self.assertEqual(result.suffix, ".wav")
+        self.assertEqual(result.read_bytes(), b"afconvert")
+        self.assertFalse(any(output_dir.glob("*.aiff")))
 
     def test_ollama_provider_parses_models_and_selects_first(self) -> None:
         provider = OllamaProvider()
