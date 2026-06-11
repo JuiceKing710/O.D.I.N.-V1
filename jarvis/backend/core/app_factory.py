@@ -19,6 +19,7 @@ from jarvis.backend.core.lm_provider import EchoLMProvider, OllamaProvider
 from jarvis.backend.core.memory_manager import MemoryManager
 from jarvis.backend.core.recovery_manager import RecoveryManager
 from jarvis.backend.core.settings_store import SettingsStore
+from jarvis.backend.core.system_monitor import SystemMonitor
 from jarvis.backend.core.vector_store import ChromaVectorStore, NullVectorStore, VectorStoreInterface
 from jarvis.backend.core.voice_manager import (
     CommandTextToSpeechAdapter,
@@ -92,6 +93,15 @@ def get_settings_store() -> SettingsStore:
 @lru_cache(maxsize=1)
 def get_event_bus() -> EventBus:
     return EventBus()
+
+
+@lru_cache(maxsize=1)
+def get_system_monitor() -> SystemMonitor:
+    try:
+        interval = float(os.environ.get("JARVIS_METRICS_INTERVAL_SECONDS", "2"))
+    except ValueError:
+        interval = 2.0
+    return SystemMonitor(get_event_bus(), interval_seconds=max(interval, 0.5))
 
 
 @lru_cache(maxsize=1)

@@ -5,7 +5,7 @@ const SPOKES = Array.from({ length: 14 }, (_, index) => index);
 
 export function AICore({ mode = "compact", state }) {
   return (
-    <section className={`ai-core ${state} ${mode}`} aria-label={`Jarvis is ${state}`}>
+    <section className={`ai-core ${state} ${mode}`} aria-label={`O.D.I.N. is ${state}`}>
       <div className="core-ring outer" />
       <div className="core-ring inner" />
       <div className="core-spokes" aria-hidden="true">

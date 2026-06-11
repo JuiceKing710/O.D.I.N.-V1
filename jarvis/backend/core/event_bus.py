@@ -29,11 +29,14 @@ class EventBus:
         self._subscribers: set[asyncio.Queue[Event]] = set()
         self._history: list[Event] = []
 
-    def publish(self, event_type: str, payload: dict[str, Any]) -> Event:
+    def publish(
+        self, event_type: str, payload: dict[str, Any], *, transient: bool = False
+    ) -> Event:
         event = Event(type=event_type, payload=payload)
-        self._history.append(event)
-        if len(self._history) > self.history_size:
-            self._history = self._history[-self.history_size :]
+        if not transient:
+            self._history.append(event)
+            if len(self._history) > self.history_size:
+                self._history = self._history[-self.history_size :]
         for subscriber in list(self._subscribers):
             subscriber.put_nowait(event)
         return event

@@ -39,6 +39,7 @@ from jarvis.backend.api.models import (
     SettingsResponse,
     SettingsUpdateRequest,
     StartupHealthResponse,
+    SystemOverviewResponse,
     ReflectionRequest,
     ReflectionResponse,
     RestoreRequest,
@@ -62,6 +63,7 @@ from jarvis.backend.core.app_factory import (
     get_permission_manager,
     get_recovery_manager,
     get_settings_store,
+    get_system_monitor,
     get_voice_manager,
 )
 from jarvis.backend.core.backup_scheduler import BackupScheduler
@@ -70,6 +72,7 @@ from jarvis.backend.core.event_bus import EventBus
 from jarvis.backend.core.jarvis_core import JarvisCore
 from jarvis.backend.core.recovery_manager import RecoveryManager
 from jarvis.backend.core.settings_store import SettingsStore
+from jarvis.backend.core.system_monitor import SystemMonitor
 from jarvis.backend.core.voice_manager import VoiceManager, VoiceState
 from jarvis.backend.utils.reflection import ReflectionEngine
 from jarvis.backend.utils.audit_logging import AuditLogger
@@ -126,6 +129,65 @@ async def startup_health(
         ready=services["backend"]["ok"] and services["memory"]["ok"],
         services=services,
     )
+
+
+@router.get("/system/overview", response_model=SystemOverviewResponse)
+async def system_overview(
+    username: str = "local-user",
+    core: JarvisCore = Depends(get_core),
+    voice_manager: VoiceManager = Depends(get_voice_manager),
+    monitor: SystemMonitor = Depends(get_system_monitor),
+    permission_manager: PermissionManager = Depends(get_permission_manager),
+    scheduler: BackupScheduler = Depends(get_backup_scheduler),
+) -> SystemOverviewResponse:
+    provider = await core.lm_provider.status()
+    voice = voice_manager.status()
+    user = core.memory.get_or_create_user(username)
+    tasks = core.memory.list_tasks(user.user_id)
+    documents = core.memory.list_documents(user.user_id)
+    conversations = core.memory.list_conversations(user.user_id, limit=100)
+    pending_approvals = permission_manager.pending_requests()
+    nodes = {
+        "reasoning_engine": {
+            "ok": provider.available,
+            "label": provider.selected_model or provider.error or provider.provider,
+            "provider": provider.provider,
+        },
+        "memory_layer": {
+            "ok": True,
+            "label": f"{len(documents)} document(s)",
+            "documents": len(documents),
+            "conversations": len(conversations),
+            "vector": core.memory.vector_store.health(),
+        },
+        "voice_interface": {
+            "ok": voice.stt_configured and voice.tts_configured,
+            "label": voice.state.value,
+            "stt_adapter": voice.stt_adapter,
+            "tts_adapter": voice.tts_adapter,
+        },
+        "security_mesh": {
+            "ok": True,
+            "label": f"{len(pending_approvals)} pending approval(s)",
+            "pending_approvals": len(pending_approvals),
+        },
+        "automation_hub": {
+            "ok": True,
+            "label": f"{sum(1 for task in tasks if task.status != 'complete')} open task(s)",
+            "tasks_open": sum(1 for task in tasks if task.status != "complete"),
+            "tasks_total": len(tasks),
+        },
+        "recovery_core": {
+            "ok": scheduler.status().last_error is None,
+            "label": scheduler.status().last_backup
+            or (f"daily @ {scheduler.hour:02d}:00" if scheduler.enabled else "disabled"),
+        },
+        "api_orchestrator": {
+            "ok": True,
+            "label": "connected",
+        },
+    }
+    return SystemOverviewResponse(metrics=monitor.snapshot(), nodes=nodes)
 
 
 @router.post("/chat", response_model=ChatResponse)

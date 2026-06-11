@@ -47,6 +47,10 @@ export function fetchStartupHealth() {
   return request("/api/v1/health/startup");
 }
 
+export function fetchSystemOverview() {
+  return request("/api/v1/system/overview");
+}
+
 export function fetchVoiceStatus() {
   return request("/api/v1/voice/status");
 }
@@ -221,9 +225,34 @@ export function connectEvents(onEvent) {
   const url = new URL(API_BASE_URL);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   url.pathname = "/api/v1/events";
-  const socket = new WebSocket(url);
-  socket.addEventListener("message", (event) => {
-    onEvent(JSON.parse(event.data));
-  });
-  return () => socket.close();
+  let socket = null;
+  let closed = false;
+  let retryDelay = 1000;
+  let retryTimer = null;
+
+  function open() {
+    if (closed) {
+      return;
+    }
+    socket = new WebSocket(url);
+    socket.addEventListener("message", (event) => {
+      onEvent(JSON.parse(event.data));
+    });
+    socket.addEventListener("open", () => {
+      retryDelay = 1000;
+    });
+    socket.addEventListener("close", () => {
+      if (!closed) {
+        retryTimer = setTimeout(open, retryDelay);
+        retryDelay = Math.min(retryDelay * 2, 15000);
+      }
+    });
+  }
+
+  open();
+  return () => {
+    closed = true;
+    clearTimeout(retryTimer);
+    socket?.close();
+  };
 }

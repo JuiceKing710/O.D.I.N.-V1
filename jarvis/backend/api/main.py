@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from jarvis.backend.api.routes import router
-from jarvis.backend.core.app_factory import get_backup_scheduler, get_core
+from jarvis.backend.core.app_factory import get_backup_scheduler, get_core, get_system_monitor
 
 
 DEFAULT_ALLOWED_ORIGINS = [
@@ -31,9 +31,12 @@ def create_app() -> FastAPI:
         get_core()
         scheduler = get_backup_scheduler()
         scheduler.start()
+        monitor = get_system_monitor()
+        monitor.start()
         try:
             yield
         finally:
+            await monitor.stop()
             await scheduler.stop()
 
     app = FastAPI(title="Jarvis V1.1", version="0.1.0", lifespan=lifespan)

@@ -15,7 +15,7 @@ async function createWindow() {
     height: 820,
     minWidth: 900,
     minHeight: 620,
-    title: "Jarvis V1.1",
+    title: "O.D.I.N. Core System",
     backgroundColor: "#11151c",
     webPreferences: {
       contextIsolation: true,

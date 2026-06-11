@@ -45,7 +45,7 @@ describe("StartupHealth", () => {
 
     render(<StartupHealth />);
 
-    expect(await screen.findByText("Jarvis needs attention")).toBeInTheDocument();
+    expect(await screen.findByText("O.D.I.N. needs attention")).toBeInTheDocument();
     expect(screen.getByText("Ollama model: check settings")).toBeInTheDocument();
   });
 });

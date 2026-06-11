@@ -14,6 +14,7 @@ import {
 } from "../ipc/apiClient.js";
 import { useAppState } from "../state/appContext.jsx";
 import { useChatStore } from "../state/chatStore.js";
+import { attachOdinAnalyser, detachOdinAnalyser } from "../state/odinPresence.js";
 
 const MESSAGE_RENDER_LIMIT = 120;
 const SCROLL_BOTTOM_THRESHOLD = 96;
@@ -43,6 +44,7 @@ export function ChatView({ onOpenCoreFocus }) {
   const [selectedMicrophone, setSelectedMicrophone] = useState("");
   const audioRef = useRef(null);
   const audioContextRef = useRef(null);
+  const playbackContextRef = useRef(null);
   const automaticListeningRef = useRef(false);
   const automaticRecordingRef = useRef(false);
   const automaticStopTimerRef = useRef(null);
@@ -163,6 +165,8 @@ export function ChatView({ onOpenCoreFocus }) {
       mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
       cancelAnimationFrame(microphoneFrameRef.current);
       audioContextRef.current?.close();
+      playbackContextRef.current?.close();
+      detachOdinAnalyser();
     };
   }, []);
 
@@ -209,25 +213,30 @@ export function ChatView({ onOpenCoreFocus }) {
       try {
         setVoiceState("speaking");
         const response = await synthesizeVoice({ text: message.content });
-        const audio = new Audio(resolveApiUrl(response.audio_url));
+        const audio = new Audio();
+        audio.crossOrigin = "anonymous";
+        audio.src = resolveApiUrl(response.audio_url);
         audioRef.current = audio;
         setBackendSpeaking(true);
+        connectSpeechAnalyser(audio);
         audio.onended = () => {
           audioRef.current = null;
           setBackendSpeaking(false);
           setSpeakingMessageId("");
           setVoiceState("idle");
+          detachOdinAnalyser();
         };
         audio.onerror = () => {
           audioRef.current = null;
           setBackendSpeaking(false);
           setVoiceState("idle");
+          detachOdinAnalyser();
           if (speech.available) {
             setVoiceNotice("Backend audio playback failed. Using browser voice instead.");
             speech.speak(message.content);
           } else {
             setSpeakingMessageId("");
-            setVoiceNotice("Jarvis created the voice response, but audio playback failed.");
+            setVoiceNotice("O.D.I.N. created the voice response, but audio playback failed.");
           }
         };
         await audio.play();
@@ -251,12 +260,35 @@ export function ChatView({ onOpenCoreFocus }) {
     setVoiceNotice("Speech output is unavailable. Check Backend Voice in Settings.");
   }
 
+  function connectSpeechAnalyser(audio) {
+    try {
+      const AudioContext = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContext) {
+        return;
+      }
+      if (!playbackContextRef.current) {
+        playbackContextRef.current = new AudioContext();
+      }
+      const context = playbackContextRef.current;
+      void context.resume();
+      const source = context.createMediaElementSource(audio);
+      const analyser = context.createAnalyser();
+      analyser.fftSize = 512;
+      source.connect(analyser);
+      analyser.connect(context.destination);
+      attachOdinAnalyser(analyser);
+    } catch {
+      // Without an analyser the Odin stage falls back to a simulated envelope.
+    }
+  }
+
   function stopSpeech() {
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
       audioRef.current = null;
     }
+    detachOdinAnalyser();
     setBackendSpeaking(false);
     speech.stop();
     setSpeakingMessageId("");
@@ -494,7 +526,7 @@ export function ChatView({ onOpenCoreFocus }) {
     <section className="panel chat-panel" aria-label="Chat">
       <header className="chat-header">
         <div>
-          <h1>Jarvis</h1>
+          <h1>O.D.I.N.</h1>
           <p className="conversation-label">
             Conversation {conversationId ? `#${conversationId}` : "New"}
           </p>
@@ -576,7 +608,7 @@ export function ChatView({ onOpenCoreFocus }) {
               speakMessage({
                 id: "voice-test",
                 role: "assistant",
-                content: "Jarvis voice test. If you can hear this, speech output is working.",
+                content: "O.D.I.N. voice test. If you can hear this, speech output is working.",
               });
             }}
             disabled={voiceDisabled || (!backendVoiceAvailable && !speech.available)}

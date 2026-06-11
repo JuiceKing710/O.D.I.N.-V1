@@ -21,8 +21,10 @@ from jarvis.backend.core.app_factory import (
     get_permission_manager,
     get_recovery_manager,
     get_settings_store,
+    get_system_monitor,
     get_voice_manager,
 )
+from jarvis.backend.core.system_monitor import SystemMonitor
 from jarvis.backend.core.backup_scheduler import BackupScheduler
 from jarvis.backend.core.bot_manager import BotManager
 from jarvis.backend.core.event_bus import EventBus
@@ -119,6 +121,7 @@ class ApiTests(unittest.TestCase):
         app.dependency_overrides[get_recovery_manager] = lambda: self.recovery
         app.dependency_overrides[get_backup_scheduler] = lambda: self.backup_scheduler
         app.dependency_overrides[get_settings_store] = lambda: self.settings
+        app.dependency_overrides[get_system_monitor] = lambda: SystemMonitor()
         app.dependency_overrides[get_voice_manager] = lambda: self.voice
         self.client = TestClient(app)
 
@@ -426,6 +429,25 @@ class ApiTests(unittest.TestCase):
         self.assertTrue(body["models"][0]["loaded"])
         self.assertEqual(body["provider"]["provider"], "builtin")
         self.assertEqual(self.settings.read()["model_name"], "echo-alt")
+
+    def test_system_overview_returns_metrics_and_live_nodes(self) -> None:
+        self.client.post(
+            "/api/v1/tasks",
+            json={"name": "calibrate sensors", "username": "local-user"},
+        )
+
+        response = self.client.get("/api/v1/system/overview")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertGreaterEqual(body["metrics"]["cpu_percent"], 0.0)
+        self.assertGreater(body["metrics"]["memory"]["total_bytes"], 0)
+        self.assertIn("network", body["metrics"])
+        nodes = body["nodes"]
+        self.assertTrue(nodes["reasoning_engine"]["ok"])
+        self.assertEqual(nodes["automation_hub"]["tasks_total"], 1)
+        self.assertEqual(nodes["security_mesh"]["pending_approvals"], 0)
+        self.assertIn("voice_interface", nodes)
 
     def test_models_endpoint_reports_provider_status(self) -> None:
         self.core.lm_provider = StatusLMProvider()

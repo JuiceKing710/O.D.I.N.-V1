@@ -1,38 +1,71 @@
 import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { AICore } from "./components/AICore.jsx";
 import { ChatView } from "./components/ChatView.jsx";
 import { CoreFocusView } from "./components/CoreFocusView.jsx";
 import { DataPanel } from "./components/DataPanel.jsx";
+import { MetricsRail } from "./components/MetricsRail.jsx";
+import { OdinStage } from "./components/OdinStage.jsx";
 import { ProjectDashboard } from "./components/ProjectDashboard.jsx";
 import { SettingsPanel } from "./components/SettingsPanel.jsx";
 import { StartupHealth } from "./components/StartupHealth.jsx";
-import { connectEvents } from "./ipc/apiClient.js";
+import { TopStrip } from "./components/TopStrip.jsx";
+import { connectEvents, fetchSystemOverview } from "./ipc/apiClient.js";
 import { AppStateProvider, useAppState } from "./state/appContext.jsx";
 import { useChatStore } from "./state/chatStore.js";
+import { useSystemStore } from "./state/systemStore.js";
 import "./styles.css";
 
 const PANELS = [
-  { id: "chat", label: "Chat" },
-  { id: "projects", label: "Projects" },
-  { id: "data", label: "Data" },
-  { id: "settings", label: "Settings" },
+  { id: "overview", label: "Overview", glyph: "◉" },
+  { id: "chat", label: "Chat", glyph: "◍" },
+  { id: "workflows", label: "Workflows", glyph: "⬡" },
+  { id: "data", label: "Data Map", glyph: "⬢" },
+  { id: "settings", label: "Configuration", glyph: "⚙" },
 ];
 
 function App() {
-  const [activePanel, setActivePanel] = useState("chat");
+  const [activePanel, setActivePanel] = useState("overview");
   const [coreFocus, setCoreFocus] = useState(false);
-  const { conversationId, currentUser } = useAppState();
+  const { conversationId } = useAppState();
   const messages = useChatStore((state) => state.messages);
   const tasks = useChatStore((state) => state.tasks);
   const voiceState = useChatStore((state) => state.voiceState);
   const applyEvent = useChatStore((state) => state.applyEvent);
+  const applySystemEvent = useSystemStore((state) => state.applySystemEvent);
+  const setOverview = useSystemStore((state) => state.setOverview);
   const panelCounts = {
     chat: messages.length,
-    projects: tasks.length,
+    workflows: tasks.length,
   };
 
-  useEffect(() => connectEvents(applyEvent), [applyEvent]);
+  useEffect(
+    () =>
+      connectEvents((event) => {
+        applyEvent(event);
+        applySystemEvent(event);
+      }),
+    [applyEvent, applySystemEvent],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    async function refreshOverview() {
+      try {
+        const overview = await fetchSystemOverview();
+        if (!cancelled) {
+          setOverview(overview);
+        }
+      } catch {
+        // Telemetry stays on its last value until the backend responds again.
+      }
+    }
+    refreshOverview();
+    const timer = window.setInterval(refreshOverview, 15000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [setOverview]);
 
   if (coreFocus) {
     return (
@@ -45,16 +78,17 @@ function App() {
   }
 
   return (
-    <main className="app-shell">
-      <aside className="sidebar" aria-label="Jarvis navigation">
+    <main className="app-shell odin-shell">
+      <aside className="sidebar" aria-label="O.D.I.N. navigation">
         <div className="brand-lockup">
-          <span className="brand-mark">J</span>
+          <span className="brand-mark" aria-hidden="true">
+            ⬡
+          </span>
           <div>
-            <strong>Jarvis</strong>
-            <small>Personal Intelligence</small>
+            <strong>O.D.I.N.</strong>
+            <small>Core System</small>
           </div>
         </div>
-        <AICore state={voiceState} />
         <nav className="tabs" aria-label="Primary">
           {PANELS.map((panel) => (
             <button
@@ -66,40 +100,36 @@ function App() {
               }}
               type="button"
             >
+              <span className="tab-glyph" aria-hidden="true">
+                {panel.glyph}
+              </span>
               <span>{panel.label}</span>
               {panelCounts[panel.id] > 0 && <strong>{panelCounts[panel.id]}</strong>}
             </button>
           ))}
         </nav>
-        <dl className="sidebar-status" aria-label="Session status">
-          <div>
-            <dt>User</dt>
-            <dd>{currentUser.displayName}</dd>
-          </div>
-          <div>
-            <dt>Conversation</dt>
-            <dd>{conversationId || "New"}</dd>
-          </div>
-          <div>
-            <dt>Voice</dt>
-            <dd>{voiceState}</dd>
-          </div>
-          <div>
-            <dt>Messages</dt>
-            <dd>{messages.length}</dd>
-          </div>
-          <div>
-            <dt>Projects</dt>
-            <dd>{tasks.length}</dd>
-          </div>
-        </dl>
+        <button className="core-focus-launch" type="button" onClick={() => setCoreFocus(true)}>
+          Enter Core Focus
+        </button>
+        <footer className="sidebar-foot">
+          <strong>O.D.I.N. Core</strong>
+          <small>Optical Detection &amp; Intelligence Network</small>
+          <small>Conversation {conversationId || "new"} · voice {voiceState}</small>
+        </footer>
       </aside>
-      <section className="workspace">
+      <section className="workspace odin-workspace">
+        <TopStrip />
         <StartupHealth />
-        {activePanel === "chat" && <ChatView onOpenCoreFocus={() => setCoreFocus(true)} />}
-        {activePanel === "projects" && <ProjectDashboard />}
-        {activePanel === "data" && <DataPanel />}
-        {activePanel === "settings" && <SettingsPanel />}
+        <div className="workspace-body">
+          <div className="workspace-main">
+            {activePanel === "overview" && <OdinStage />}
+            {activePanel === "chat" && <ChatView onOpenCoreFocus={() => setCoreFocus(true)} />}
+            {activePanel === "workflows" && <ProjectDashboard />}
+            {activePanel === "data" && <DataPanel />}
+            {activePanel === "settings" && <SettingsPanel />}
+          </div>
+          <MetricsRail />
+        </div>
       </section>
     </main>
   );

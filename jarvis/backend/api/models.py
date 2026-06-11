@@ -65,6 +65,11 @@ class StartupHealthResponse(BaseModel):
     services: dict[str, dict[str, Any]]
 
 
+class SystemOverviewResponse(BaseModel):
+    metrics: dict[str, Any]
+    nodes: dict[str, dict[str, Any]]
+
+
 class ConversationSummaryResponse(BaseModel):
     convo_id: int
     user_id: int

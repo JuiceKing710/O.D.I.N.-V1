@@ -613,13 +613,41 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(payload["model"], "llama3.2:latest")
         self.assertFalse(payload["stream"])
         self.assertEqual(payload["messages"][0]["role"], "system")
-        self.assertIn("Jarvis", payload["messages"][0]["content"])
+        self.assertIn("O.D.I.N.", payload["messages"][0]["content"])
         self.assertIn("memory context", payload["messages"][1]["content"])
         self.assertEqual(payload["messages"][-1]["content"], "hello")
 
     def test_ollama_timeout_env_falls_back_when_invalid(self) -> None:
         with patch.dict("os.environ", {"OLLAMA_TIMEOUT_SECONDS": "not-a-number"}):
             self.assertEqual(_ollama_timeout_seconds(), 120.0)
+
+    def test_system_monitor_snapshot_reports_host_metrics(self) -> None:
+        from jarvis.backend.core.system_monitor import SystemMonitor
+
+        monitor = SystemMonitor()
+        first = monitor.snapshot()
+        second = monitor.snapshot()
+
+        self.assertGreaterEqual(first["cpu_percent"], 0.0)
+        self.assertGreater(first["memory"]["total_bytes"], 0)
+        self.assertGreater(first["disk"]["total_bytes"], 0)
+        self.assertGreater(first["uptime_seconds"], 0)
+        self.assertGreaterEqual(second["network"]["sent_bytes_per_sec"], 0.0)
+        self.assertGreaterEqual(second["network"]["recv_bytes_per_sec"], 0.0)
+        self.assertIn("sampled_at", second)
+
+    def test_transient_events_reach_subscribers_but_not_history(self) -> None:
+        from jarvis.backend.core.event_bus import EventBus
+
+        bus = EventBus()
+        queue = asyncio.run(bus.subscribe())
+        bus.publish("system.metrics", {"cpu_percent": 1.0}, transient=True)
+        bus.publish("chat.message", {"text": "hello"})
+
+        history_types = [event.type for event in bus.history()]
+        self.assertEqual(history_types, ["chat.message"])
+        self.assertEqual(queue.get_nowait().type, "system.metrics")
+        self.assertEqual(queue.get_nowait().type, "chat.message")
 
     def test_persisted_model_name_ignores_default_and_blank_values(self) -> None:
         store = SettingsStore(Path(self.tmp.name) / "model-settings.json")

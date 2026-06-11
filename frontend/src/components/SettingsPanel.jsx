@@ -233,7 +233,7 @@ export function SettingsPanel() {
     setError("");
     try {
       const response = await synthesizeVoice({
-        text: "Jarvis backend voice synthesis is online.",
+        text: "O.D.I.N. backend voice synthesis is online.",
       });
       setVoiceStatus((current) => ({
         ...(current || {}),

@@ -52,7 +52,7 @@ export function StartupHealth() {
   return (
     <section className="startup-health" aria-label="Startup health">
       <div>
-        <strong>{error ? "Jarvis backend is offline" : "Jarvis needs attention"}</strong>
+        <strong>{error ? "O.D.I.N. backend is offline" : "O.D.I.N. needs attention"}</strong>
         <small>
           {error
             ? "Start the desktop app again or run the backend from the project directory."

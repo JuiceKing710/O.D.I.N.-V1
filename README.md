@@ -1,7 +1,10 @@
-# Jarvis V1.1
+# O.D.I.N. — Optical Detection & Intelligence Network (Jarvis V1.1)
 
-Jarvis V1.1 is a local-first personal assistant based on the master architecture specification.
+O.D.I.N. is a local-first personal assistant based on the master architecture specification.
 The repository is split into a FastAPI backend, a React/Electron frontend shell, scripts, and tests.
+The interface is themed after the tree-of-life mockups in `design/`: an animated Odin head at the
+center, software-layer nodes above, hardware-layer nodes below, all driven by live telemetry. Odin's
+eyes and aura react to real speech amplitude while the assistant talks.
 
 ## Current Scope
 
@@ -13,7 +16,11 @@ The current build includes:
 - Interactive one-time permission approvals and audit logging.
 - Voice transcription/synthesis adapters, reflection summaries, and vector-memory integration.
 - Encrypted full-state backup, restore, daily scheduling, catch-up, and retention controls.
-- Frontend application shell with AI core, chat, dashboard, and settings components.
+- Real-time system telemetry (CPU, memory, disk, network, battery, uptime) streamed over the
+  events WebSocket as `system.metrics`, plus a `/api/v1/system/overview` endpoint with live
+  subsystem node statuses.
+- Frontend O.D.I.N. shell: tree-of-life overview stage, top status strip, live metrics rail,
+  activity stream, chat, workflows, data map, and configuration panels.
 - Electron desktop wrapper around the built React app.
 - Unit and API tests for core message handling, persistence, bot dispatch, permissions, CORS, tasks, and settings.
 

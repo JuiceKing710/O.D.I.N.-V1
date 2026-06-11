@@ -157,7 +157,7 @@ export function ProjectDashboard() {
           <textarea
             value={description}
             onChange={(event) => setDescription(event.target.value)}
-            placeholder="What should Jarvis track?"
+            placeholder="What should O.D.I.N. track?"
             rows={3}
           />
         </label>
