@@ -40,6 +40,15 @@ def _default_db_path() -> Path:
     return Path(os.environ.get("JARVIS_DB_PATH", "data/jarvis.db"))
 
 
+def _persisted_model_name(settings_store: SettingsStore) -> str | None:
+    saved = settings_store.read().get("model_name")
+    if isinstance(saved, str):
+        cleaned = saved.strip()
+        if cleaned and cleaned != "local-default":
+            return cleaned
+    return None
+
+
 def _ollama_timeout_seconds() -> float:
     raw = os.environ.get("OLLAMA_TIMEOUT_SECONDS", "120")
     try:
@@ -196,7 +205,7 @@ def get_core() -> JarvisCore:
     else:
         lm_provider = OllamaProvider(
             base_url=os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434"),
-            model=os.environ.get("OLLAMA_MODEL"),
+            model=os.environ.get("OLLAMA_MODEL") or _persisted_model_name(get_settings_store()),
             timeout_seconds=_ollama_timeout_seconds(),
         )
     return JarvisCore(

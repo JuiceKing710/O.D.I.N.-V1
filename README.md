@@ -45,6 +45,10 @@ export OLLAMA_MODEL=llama3.2
 export OLLAMA_TIMEOUT_SECONDS=120
 ```
 
+When `OLLAMA_MODEL` is not set, Jarvis uses the model last loaded from Settings → Model
+(persisted in `data/settings.json`), and otherwise auto-selects the first installed chat
+model, skipping embedding-only models such as `nomic-embed-text`.
+
 Enable persistent vector memory with:
 
 ```bash

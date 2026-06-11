@@ -214,6 +214,9 @@ class OllamaProvider(LMProviderInterface):
     def _selected_model_from(self, models: list[str]) -> str | None:
         if self.model:
             return self.model if self.model in models else None
+        for name in models:
+            if "embed" not in name.lower():
+                return name
         return models[0] if models else None
 
     @staticmethod

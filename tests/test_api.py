@@ -425,6 +425,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(body["models"][0]["id"], "echo-alt")
         self.assertTrue(body["models"][0]["loaded"])
         self.assertEqual(body["provider"]["provider"], "builtin")
+        self.assertEqual(self.settings.read()["model_name"], "echo-alt")
 
     def test_models_endpoint_reports_provider_status(self) -> None:
         self.core.lm_provider = StatusLMProvider()

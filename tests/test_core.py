@@ -18,7 +18,8 @@ from jarvis.backend.bots.code_bot import CodeBot
 from jarvis.backend.bots.file_bot import FileBot
 from jarvis.backend.bots.research_bot import ResearchBot
 from jarvis.backend.bots.system_bot import SystemBot
-from jarvis.backend.core.app_factory import _ollama_timeout_seconds
+from jarvis.backend.core.app_factory import _ollama_timeout_seconds, _persisted_model_name
+from jarvis.backend.core.settings_store import SettingsStore
 from jarvis.backend.core.backup_scheduler import BackupScheduler
 from jarvis.backend.core.bot_manager import BotManager, BotMessage
 from jarvis.backend.core.jarvis_core import JarvisCore
@@ -539,6 +540,20 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(status.selected_model, "llama3.2:latest")
         self.assertTrue(status.available)
 
+    def test_ollama_provider_skips_embedding_models_when_auto_selecting(self) -> None:
+        provider = OllamaProvider()
+
+        with patch(
+            "urllib.request.urlopen",
+            return_value=MockHttpResponse(
+                {"models": [{"name": "nomic-embed-text:latest"}, {"name": "llama3.1:8b"}]}
+            ),
+        ):
+            status = asyncio.run(provider.status())
+
+        self.assertEqual(status.selected_model, "llama3.1:8b")
+        self.assertTrue(status.available)
+
     def test_ollama_provider_honors_configured_model(self) -> None:
         provider = OllamaProvider(model="mistral:latest")
 
@@ -605,6 +620,16 @@ class CoreTests(unittest.TestCase):
     def test_ollama_timeout_env_falls_back_when_invalid(self) -> None:
         with patch.dict("os.environ", {"OLLAMA_TIMEOUT_SECONDS": "not-a-number"}):
             self.assertEqual(_ollama_timeout_seconds(), 120.0)
+
+    def test_persisted_model_name_ignores_default_and_blank_values(self) -> None:
+        store = SettingsStore(Path(self.tmp.name) / "model-settings.json")
+        self.assertIsNone(_persisted_model_name(store))
+
+        store.update({"model_name": "   "})
+        self.assertIsNone(_persisted_model_name(store))
+
+        store.update({"model_name": "llama3.1:8b"})
+        self.assertEqual(_persisted_model_name(store), "llama3.1:8b")
 
     def test_backup_scheduler_targets_next_local_four_am(self) -> None:
         recovery = RecoveryManager(
