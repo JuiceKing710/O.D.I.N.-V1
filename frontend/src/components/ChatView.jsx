@@ -64,6 +64,7 @@ export function ChatView({ onOpenCoreFocus }) {
   const setMessages = useChatStore((state) => state.setMessages);
   const voiceState = useChatStore((state) => state.voiceState);
   const setVoiceState = useChatStore((state) => state.setVoiceState);
+  const streaming = useChatStore((state) => state.streaming);
   const speech = useSpeechSynthesis({
     onStart: () => setVoiceState("speaking"),
     onEnd: () => {
@@ -704,6 +705,17 @@ export function ChatView({ onOpenCoreFocus }) {
               <p>{message.content}</p>
             </article>
           ))}
+          {streaming?.text && (
+            <article className="message assistant streaming">
+              <div className="message-meta">
+                <span>assistant</span>
+              </div>
+              <p>
+                {streaming.text}
+                {streaming.active && <i className="stream-cursor" aria-hidden="true" />}
+              </p>
+            </article>
+          )}
           <div ref={messageEndRef} />
         </div>
         {showJumpLatest && (

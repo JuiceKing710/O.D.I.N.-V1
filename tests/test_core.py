@@ -107,6 +107,20 @@ class MockHttpResponse:
         return self.body
 
 
+class FakeStreamResponse:
+    def __init__(self, lines: list[bytes]) -> None:
+        self.lines = lines
+
+    def __enter__(self) -> "FakeStreamResponse":
+        return self
+
+    def __exit__(self, exc_type, exc, traceback) -> None:
+        return None
+
+    def __iter__(self):
+        return iter(self.lines)
+
+
 class FakeSpeechToTextAdapter:
     name = "fake-stt"
     configured = True
@@ -144,6 +158,15 @@ class CoreTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.tmp.cleanup()
+
+    def _build_core(self, provider, event_bus=None) -> JarvisCore:
+        return JarvisCore(
+            memory=self.memory,
+            bot_manager=self.bot_manager,
+            lm_provider=provider,
+            audit_logger=self.audit,
+            event_bus=event_bus,
+        )
 
     def test_handle_message_persists_conversation(self) -> None:
         result = asyncio.run(self.core.handle_message("remember the blue folder", "tester"))
@@ -654,6 +677,123 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(queue.get_nowait().type, "system.metrics")
         self.assertEqual(queue.get_nowait().type, "chat.message")
 
+    def test_handle_message_sends_conversation_history_to_provider(self) -> None:
+        captured = {}
+
+        class RecordingProvider(EchoLMProvider):
+            async def generate_stream(self, text, context, metadata=None, history=None):
+                captured["history"] = history
+                yield f"echo: {text}"
+
+        core = self._build_core(RecordingProvider())
+        first = asyncio.run(core.handle_message("my favorite rune is Othala", "zeb"))
+        asyncio.run(
+            core.handle_message(
+                "what is my favorite rune?", "zeb", conversation_id=first["conversation_id"]
+            )
+        )
+
+        history = captured["history"]
+        self.assertEqual(history[0]["role"], "user")
+        self.assertEqual(history[0]["content"], "my favorite rune is Othala")
+        self.assertEqual(history[1]["role"], "assistant")
+        self.assertIn("echo: my favorite rune is Othala", history[1]["content"])
+
+    def test_handle_message_publishes_stream_deltas_transiently(self) -> None:
+        from jarvis.backend.core.event_bus import EventBus
+
+        class ChunkProvider(EchoLMProvider):
+            async def generate_stream(self, text, context, metadata=None, history=None):
+                yield "All "
+                yield "systems "
+                yield "nominal."
+
+        bus = EventBus()
+        core = self._build_core(ChunkProvider(), event_bus=bus)
+        result = asyncio.run(core.handle_message("status report", "zeb"))
+
+        self.assertEqual(result["reply"], "All systems nominal.")
+        history_types = [event.type for event in bus.history()]
+        self.assertNotIn("chat.stream", history_types)
+        self.assertIn("chat.message", history_types)
+
+    def test_ollama_messages_include_history_turns(self) -> None:
+        messages = OllamaProvider._build_messages(
+            "and now?",
+            [],
+            [
+                {"role": "user", "content": "hello"},
+                {"role": "assistant", "content": "hi there"},
+            ],
+        )
+
+        self.assertEqual(messages[0]["role"], "system")
+        self.assertIn("Your name is Odin", messages[0]["content"])
+        self.assertEqual(
+            [(m["role"], m["content"]) for m in messages[1:]],
+            [("user", "hello"), ("assistant", "hi there"), ("user", "and now?")],
+        )
+
+    def test_gemini_payload_maps_history_to_model_role(self) -> None:
+        payload = GeminiProvider._build_payload(
+            "and now?",
+            ["a fact"],
+            [
+                {"role": "user", "content": "hello"},
+                {"role": "assistant", "content": "hi there"},
+            ],
+        )
+
+        self.assertIn("Your name is Odin", payload["system_instruction"]["parts"][0]["text"])
+        self.assertIn("a fact", payload["system_instruction"]["parts"][0]["text"])
+        roles = [item["role"] for item in payload["contents"]]
+        self.assertEqual(roles, ["user", "model", "user"])
+
+    def test_ollama_stream_yields_deltas_until_done(self) -> None:
+        provider = OllamaProvider(model="llama3.1:8b")
+        lines = [
+            b'{"message": {"content": "Hel"}, "done": false}\n',
+            b'{"message": {"content": "lo."}, "done": true}\n',
+        ]
+
+        def fake_urlopen(request, timeout=None):
+            if request.full_url.endswith("/api/tags"):
+                return MockHttpResponse({"models": [{"name": "llama3.1:8b"}]})
+            return FakeStreamResponse(lines)
+
+        async def collect():
+            chunks = []
+            async for delta in provider.generate_stream("hi", []):
+                chunks.append(delta)
+            return chunks
+
+        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            chunks = asyncio.run(collect())
+
+        self.assertEqual(chunks, ["Hel", "lo."])
+
+    def test_turbo_stream_falls_back_to_local_when_gemini_fails(self) -> None:
+        import urllib.error
+
+        local = EchoLMProvider()
+        settings = {"turbo_mode": True, "gemini_api_key": "test-key"}
+        provider = TurboSwitchProvider(local, lambda: settings)
+
+        async def collect():
+            chunks = []
+            async for delta in provider.generate_stream("offline hello", []):
+                chunks.append(delta)
+            return "".join(chunks)
+
+        with patch(
+            "urllib.request.urlopen",
+            side_effect=urllib.error.URLError("no internet"),
+        ):
+            reply = asyncio.run(collect())
+
+        self.assertIn("offline hello", reply)
+        self.assertIn("no internet", provider.last_turbo_error)
+
     def test_gemini_provider_parses_reply_and_sends_key_header(self) -> None:
         provider = GeminiProvider(api_key="test-key")
         captured = {}
@@ -676,8 +816,8 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(reply, "Greetings from the cloud.")
         self.assertIn("gemini-2.5-flash:generateContent", captured["url"])
         self.assertEqual(captured["headers"].get("X-goog-api-key"), "test-key")
-        self.assertIn("O.D.I.N.", captured["payload"]["system_instruction"]["parts"][0]["text"])
-        self.assertIn("fact one", captured["payload"]["contents"][0]["parts"][0]["text"])
+        self.assertIn("Odin", captured["payload"]["system_instruction"]["parts"][0]["text"])
+        self.assertIn("fact one", captured["payload"]["system_instruction"]["parts"][0]["text"])
 
     def test_turbo_switch_uses_gemini_when_enabled_and_falls_back_offline(self) -> None:
         local = EchoLMProvider()

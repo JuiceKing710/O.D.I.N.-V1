@@ -4,7 +4,9 @@ export const useChatStore = create((set) => ({
   messages: [],
   tasks: [],
   voiceState: "idle",
-  clearMessages: () => set({ messages: [] }),
+  streaming: null,
+  clearStreaming: () => set({ streaming: null }),
+  clearMessages: () => set({ messages: [], streaming: null }),
   setMessages: (messages) =>
     set({
       messages: messages.map((message) => ({
@@ -33,6 +35,24 @@ export const useChatStore = create((set) => ({
       if (event.type === "voice.state") {
         return { voiceState: event.payload.state || "idle" };
       }
+      if (event.type === "chat.stream") {
+        const previous =
+          state.streaming &&
+          state.streaming.conversationId === event.payload.conversation_id &&
+          state.streaming.active
+            ? state.streaming.text
+            : "";
+        return {
+          streaming: {
+            conversationId: event.payload.conversation_id,
+            text: previous + (event.payload.delta || ""),
+            active: true,
+          },
+        };
+      }
+      if (event.type === "chat.stream.end") {
+        return state.streaming ? { streaming: { ...state.streaming, active: false } } : {};
+      }
       if (event.type === "task.updated") {
         const task = event.payload.task;
         const tasks = state.tasks.some((current) => current.task_id === task.task_id)
@@ -47,14 +67,15 @@ export const useChatStore = create((set) => ({
           content: event.payload.content,
           conversationId: event.payload.conversation_id,
         };
+        const streaming = message.role === "assistant" ? null : state.streaming;
         if (
           state.messages.some(
             (current) => current.role === message.role && current.content === message.content,
           )
         ) {
-          return {};
+          return { streaming };
         }
-        return { messages: [...state.messages, message] };
+        return { messages: [...state.messages, message], streaming };
       }
       return {};
     }),

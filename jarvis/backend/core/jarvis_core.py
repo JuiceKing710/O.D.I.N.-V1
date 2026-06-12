@@ -51,7 +51,10 @@ class JarvisCore:
             reply = bot_reply
         else:
             context = self.memory.query_context(user.user_id, normalized, limit=5)
-            reply = await self.lm_provider.generate(normalized, context=context, metadata=metadata or {})
+            history = self._conversation_history(convo.convo_id)
+            reply = await self._generate_streaming(
+                normalized, context, history, convo.convo_id, metadata or {}
+            )
 
         assistant_message = self.memory.add_message(convo.convo_id, "assistant", reply)
         self._publish_chat_message(assistant_message.role, assistant_message.content, convo.convo_id)
@@ -67,6 +70,45 @@ class JarvisCore:
             "bot": bot_name,
             "created_at": datetime.now(timezone.utc),
         }
+
+    HISTORY_TURN_LIMIT = 20
+
+    def _conversation_history(self, convo_id: int) -> list[dict[str, str]]:
+        records = self.memory.list_conversation_messages(convo_id)
+        # The just-stored current user message is the last record; the model
+        # receives it separately as the prompt.
+        previous = records[:-1]
+        return [
+            {"role": record.role, "content": record.content}
+            for record in previous[-self.HISTORY_TURN_LIMIT :]
+        ]
+
+    async def _generate_streaming(
+        self,
+        text: str,
+        context: list[str],
+        history: list[dict[str, str]],
+        convo_id: int,
+        metadata: dict[str, Any],
+    ) -> str:
+        parts: list[str] = []
+        try:
+            async for delta in self.lm_provider.generate_stream(
+                text, context=context, metadata=metadata, history=history
+            ):
+                parts.append(delta)
+                if self.event_bus is not None:
+                    self.event_bus.publish(
+                        "chat.stream",
+                        {"conversation_id": convo_id, "delta": delta},
+                        transient=True,
+                    )
+        finally:
+            if self.event_bus is not None:
+                self.event_bus.publish(
+                    "chat.stream.end", {"conversation_id": convo_id}, transient=True
+                )
+        return "".join(parts)
 
     def _publish_chat_message(self, role: str, content: str, conversation_id: int) -> None:
         if self.event_bus is None:

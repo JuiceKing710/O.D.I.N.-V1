@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { ChatDock } from "./components/ChatDock.jsx";
 import { ChatView } from "./components/ChatView.jsx";
 import { CoreFocusView } from "./components/CoreFocusView.jsx";
 import { DataPanel } from "./components/DataPanel.jsx";
@@ -122,7 +123,12 @@ function App() {
         <StartupHealth />
         <div className="workspace-body">
           <div className="workspace-main">
-            {activePanel === "overview" && <OdinStage />}
+            {activePanel === "overview" && (
+              <>
+                <OdinStage />
+                <ChatDock />
+              </>
+            )}
             {activePanel === "chat" && <ChatView onOpenCoreFocus={() => setCoreFocus(true)} />}
             {activePanel === "workflows" && <ProjectDashboard />}
             {activePanel === "data" && <DataPanel />}

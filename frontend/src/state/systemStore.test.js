@@ -1,5 +1,35 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { formatBytes, formatRate, formatUptime, useSystemStore } from "./systemStore.js";
+import { useChatStore } from "./chatStore.js";
+
+describe("chatStore streaming", () => {
+  beforeEach(() => {
+    useChatStore.setState({ messages: [], streaming: null });
+  });
+
+  it("accumulates stream deltas and clears on the final assistant message", () => {
+    const apply = useChatStore.getState().applyEvent;
+    apply({ type: "chat.stream", payload: { conversation_id: 7, delta: "All " } });
+    apply({ type: "chat.stream", payload: { conversation_id: 7, delta: "systems nominal." } });
+
+    expect(useChatStore.getState().streaming).toEqual({
+      conversationId: 7,
+      text: "All systems nominal.",
+      active: true,
+    });
+
+    apply({ type: "chat.stream.end", payload: { conversation_id: 7 } });
+    expect(useChatStore.getState().streaming.active).toBe(false);
+
+    apply({
+      id: "evt-9",
+      type: "chat.message",
+      payload: { role: "assistant", content: "All systems nominal.", conversation_id: 7 },
+    });
+    expect(useChatStore.getState().streaming).toBeNull();
+    expect(useChatStore.getState().messages).toHaveLength(1);
+  });
+});
 
 describe("systemStore", () => {
   beforeEach(() => {

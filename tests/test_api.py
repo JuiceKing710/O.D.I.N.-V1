@@ -40,7 +40,7 @@ from jarvis.backend.utils.permissions import Permission, PermissionDecision, Per
 
 
 class FailingLMProvider(EchoLMProvider):
-    async def generate(self, text, context, metadata=None) -> str:
+    async def generate(self, text, context, metadata=None, history=None) -> str:
         raise RuntimeError("Ollama is not running at http://127.0.0.1:11434. Run `ollama serve`.")
 
     async def list_models(self) -> list[ModelInfo]:

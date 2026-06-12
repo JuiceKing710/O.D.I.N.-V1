@@ -2109,6 +2109,7 @@ textarea:focus-visible {
 }
 
 .workspace-main {
+  position: relative;
   min-width: 0;
   min-height: 0;
   overflow: auto;
@@ -2620,4 +2621,218 @@ textarea:focus-visible {
   font-size: 0.8rem;
   letter-spacing: 0.3em;
   text-transform: uppercase;
+}
+
+/* Chat dock on the Odin stage */
+
+.dock-toggle {
+  position: absolute;
+  right: 22px;
+  bottom: 22px;
+  z-index: 5;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 12px 18px;
+  color: var(--odin-text);
+  font-size: 0.78rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  background: rgba(10, 16, 34, 0.9);
+  border: 1px solid var(--odin-line-strong);
+  border-radius: 99px;
+  cursor: pointer;
+  box-shadow: 0 0 24px rgba(56, 189, 248, 0.25);
+  backdrop-filter: blur(8px);
+  transition: box-shadow 180ms ease, transform 180ms ease;
+}
+
+.dock-toggle:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 0 32px rgba(56, 189, 248, 0.45);
+}
+
+.dock-toggle span {
+  font-size: 1.2rem;
+  color: var(--odin-cyan);
+  text-shadow: 0 0 12px var(--odin-glow-cyan);
+}
+
+.chat-dock {
+  position: absolute;
+  right: 18px;
+  bottom: 18px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  width: min(380px, calc(100% - 36px));
+  max-height: min(540px, calc(100% - 36px));
+  overflow: hidden;
+  background: rgba(7, 11, 28, 0.92);
+  border: 1px solid var(--odin-line-strong);
+  border-radius: 16px;
+  box-shadow: 0 12px 48px rgba(2, 6, 23, 0.7), 0 0 24px rgba(56, 189, 248, 0.15);
+  backdrop-filter: blur(12px);
+}
+
+.dock-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--odin-line);
+}
+
+.dock-header strong {
+  display: block;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  font-size: 0.78rem;
+  color: var(--odin-text);
+}
+
+.dock-header small {
+  color: var(--odin-text-dim);
+  font-size: 0.66rem;
+}
+
+.dock-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.dock-actions button {
+  width: 28px;
+  height: 28px;
+  color: var(--odin-text-dim);
+  background: rgba(56, 189, 248, 0.06);
+  border: 1px solid var(--odin-line);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.dock-actions button:hover {
+  color: var(--odin-text);
+  border-color: var(--odin-line-strong);
+}
+
+.dock-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 160px;
+}
+
+.dock-empty {
+  margin: auto;
+  color: var(--odin-text-dim);
+  font-size: 0.78rem;
+}
+
+.dock-message {
+  max-width: 88%;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: rgba(56, 189, 248, 0.06);
+  border: 1px solid var(--odin-line);
+}
+
+.dock-message.user {
+  align-self: flex-end;
+  background: rgba(99, 102, 241, 0.12);
+}
+
+.dock-message.assistant {
+  align-self: flex-start;
+}
+
+.dock-message span {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--odin-cyan);
+  font-size: 0.62rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.dock-message.user span {
+  color: var(--odin-violet);
+}
+
+.dock-message p {
+  margin: 0;
+  font-size: 0.84rem;
+  line-height: 1.5;
+  color: var(--odin-text);
+  white-space: pre-wrap;
+}
+
+.dock-error {
+  margin: 0;
+  padding: 6px 14px;
+  color: var(--odin-red);
+  font-size: 0.74rem;
+}
+
+.dock-composer {
+  display: flex;
+  gap: 8px;
+  padding: 12px 14px;
+  border-top: 1px solid var(--odin-line);
+}
+
+.dock-composer input {
+  flex: 1;
+  padding: 9px 12px;
+  color: var(--odin-text);
+  background: rgba(10, 16, 34, 0.8);
+  border: 1px solid var(--odin-line);
+  border-radius: 10px;
+}
+
+.dock-composer input:focus {
+  outline: none;
+  border-color: var(--odin-line-strong);
+}
+
+.dock-composer button {
+  padding: 9px 16px;
+  color: #04060f;
+  font-weight: 600;
+  background: linear-gradient(135deg, var(--odin-cyan), var(--odin-blue));
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.dock-composer button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* Streaming cursor */
+
+.stream-cursor {
+  display: inline-block;
+  width: 8px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: var(--odin-cyan);
+  border-radius: 2px;
+  animation: stream-blink 800ms ease-in-out infinite;
+  box-shadow: 0 0 8px var(--odin-glow-cyan);
+}
+
+@keyframes stream-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.2; }
+}
+
+.message.streaming p,
+.dock-message.streaming p {
+  color: var(--odin-text);
 }
