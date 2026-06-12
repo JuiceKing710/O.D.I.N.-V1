@@ -535,6 +535,62 @@ class CoreTests(unittest.TestCase):
 
         self.assertEqual(transcript, "hello from whisper")
 
+    def test_wake_word_listener_publishes_through_bound_loop(self) -> None:
+        from jarvis.backend.core.event_bus import EventBus
+        from jarvis.backend.core.wake_word import WakeWordListener
+
+        bus = EventBus()
+        listener = WakeWordListener(bus, model_name="hey_jarvis")
+
+        async def fire():
+            listener.bind_loop(asyncio.get_running_loop())
+            listener._publish(0.91)
+            await asyncio.sleep(0)
+
+        asyncio.run(fire())
+
+        events = [event for event in bus.history() if event.type == "voice.wake"]
+        self.assertEqual(events, [])  # transient events stay out of history
+
+        async def fire_and_collect():
+            listener.bind_loop(asyncio.get_running_loop())
+            queue = await bus.subscribe()
+            listener._publish(0.91)
+            await asyncio.sleep(0)
+            return queue.get_nowait()
+
+        event = asyncio.run(fire_and_collect())
+        self.assertEqual(event.type, "voice.wake")
+        self.assertEqual(event.payload["model"], "hey_jarvis")
+
+    def test_piper_adapter_synthesizes_through_stdin(self) -> None:
+        from jarvis.backend.core.voice_manager import PiperTextToSpeechAdapter
+
+        output_dir = Path(self.tmp.name) / "voice"
+        adapter = PiperTextToSpeechAdapter("/fake/piper", "/fake/model.onnx", output_dir)
+        captured = {}
+
+        def fake_run(command, **kwargs):
+            captured["command"] = command
+            captured["input"] = kwargs.get("input")
+            Path(command[command.index("-f") + 1]).write_bytes(b"RIFFfake")
+            return SimpleNamespace(returncode=0, stderr="")
+
+        with patch("subprocess.run", side_effect=fake_run):
+            result = adapter.synthesize("Greetings from Asgard.")
+
+        self.assertEqual(result.suffix, ".wav")
+        self.assertEqual(captured["input"], "Greetings from Asgard.")
+        self.assertEqual(captured["command"][0], "/fake/piper")
+        self.assertIn("/fake/model.onnx", captured["command"])
+
+        self.assertFalse(
+            PiperTextToSpeechAdapter.available(None, Path("/fake/model.onnx"))
+        )
+        self.assertFalse(
+            PiperTextToSpeechAdapter.available("/fake/piper", Path("/missing.onnx"))
+        )
+
     def test_macos_voice_output_is_converted_to_wav(self) -> None:
         output_dir = Path(self.tmp.name) / "voice"
         adapter = MacOSTextToSpeechAdapter(output_dir)

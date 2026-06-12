@@ -5,6 +5,7 @@ export const useChatStore = create((set) => ({
   tasks: [],
   voiceState: "idle",
   streaming: null,
+  wakeSignal: 0,
   clearStreaming: () => set({ streaming: null }),
   clearMessages: () => set({ messages: [], streaming: null }),
   setMessages: (messages) =>
@@ -34,6 +35,9 @@ export const useChatStore = create((set) => ({
     set((state) => {
       if (event.type === "voice.state") {
         return { voiceState: event.payload.state || "idle" };
+      }
+      if (event.type === "voice.wake") {
+        return { wakeSignal: state.wakeSignal + 1 };
       }
       if (event.type === "chat.stream") {
         const previous =

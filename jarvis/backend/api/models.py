@@ -138,6 +138,7 @@ class SettingsResponse(BaseModel):
     permissions: dict[str, str] = Field(default_factory=dict)
     turbo_mode: bool = False
     gemini_api_key_set: bool = False
+    wake_word: bool = False
 
 
 class SettingsUpdateRequest(BaseModel):
@@ -147,6 +148,7 @@ class SettingsUpdateRequest(BaseModel):
     permissions: dict[str, Literal["allowed", "denied", "prompt"]] | None = None
     turbo_mode: bool | None = None
     gemini_api_key: str | None = None
+    wake_word: bool | None = None
 
 
 class PermissionRequestResponse(BaseModel):

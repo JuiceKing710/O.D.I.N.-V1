@@ -16,6 +16,7 @@ export function ChatDock() {
   const { conversationId, currentUser, settings, setConversationId } = useAppState();
   const messages = useChatStore((state) => state.messages);
   const streaming = useChatStore((state) => state.streaming);
+  const wakeSignal = useChatStore((state) => state.wakeSignal);
   const addMessage = useChatStore((state) => state.addMessage);
   const setVoiceState = useChatStore((state) => state.setVoiceState);
   const voice = useOdinVoice();
@@ -34,6 +35,12 @@ export function ChatDock() {
       inputRef.current?.focus();
     }
   }, [open]);
+
+  useEffect(() => {
+    if (wakeSignal > 0) {
+      setOpen(true);
+    }
+  }, [wakeSignal]);
 
   async function handleSubmit(event) {
     event.preventDefault();

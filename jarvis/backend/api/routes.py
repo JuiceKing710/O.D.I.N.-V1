@@ -68,8 +68,10 @@ from jarvis.backend.core.app_factory import (
     get_settings_store,
     get_system_monitor,
     get_voice_manager,
+    get_wake_word_listener,
 )
 from jarvis.backend.core.memory_consolidator import MemoryConsolidator
+from jarvis.backend.core.wake_word import WakeWordListener
 from jarvis.backend.core.backup_scheduler import BackupScheduler
 from jarvis.backend.core.bot_manager import BotMessage
 from jarvis.backend.core.event_bus import EventBus
@@ -486,12 +488,17 @@ def update_settings(
     request: SettingsUpdateRequest,
     settings: SettingsStore = Depends(get_settings_store),
     permission_manager: PermissionManager = Depends(get_permission_manager),
+    wake_listener: WakeWordListener = Depends(get_wake_word_listener),
 ) -> SettingsResponse:
     patch = request.model_dump(exclude_none=True)
     try:
         if "permissions" in patch:
             permission_manager.update_decisions(patch["permissions"])
         settings.update(patch)
+        if patch.get("wake_word") is True:
+            wake_listener.start()
+        elif patch.get("wake_word") is False:
+            wake_listener.stop()
         return _settings_response(settings, permission_manager)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

@@ -80,6 +80,13 @@ export JARVIS_WHISPER_COMMAND='whisper-cli {audio_path}'
 export JARVIS_TTS_COMMAND='tts-cli --text {text} --output {output_path}'
 ```
 
+Odin speaks with a local Piper neural voice when `pip install -e ".[voice]"` is installed and a
+voice model exists at `~/jarvis-models/piper/en_US-ryan-medium.onnx` (override with
+`JARVIS_PIPER_VOICE`); otherwise speech falls back to macOS `say`. An optional wake word
+(Settings → Voice; default model `hey_jarvis`, override with `JARVIS_WAKE_MODEL` once a custom
+"Hey Odin" model is trained) listens through openwakeword and opens the chat dock when heard —
+macOS will request microphone access for the backend on first use.
+
 Jarvis defaults to `~/jarvis-models/ggml-base.en.bin` for local Whisper input. Override it with
 `JARVIS_WHISPER_MODEL`, or use Settings → Voice → Set up local speech model to download a
 compatible model. The Electron app requests macOS microphone access on first use.

@@ -37,4 +37,18 @@ describe("ChatDock", () => {
     expect(screen.getByText("I am O")).toBeInTheDocument();
     expect(screen.getByLabelText("Message Odin")).toBeInTheDocument();
   });
+
+  it("opens automatically when the wake word fires", async () => {
+    useChatStore.setState({ messages: [], streaming: null, wakeSignal: 0, voiceState: "idle" });
+
+    render(
+      <AppStateProvider>
+        <ChatDock />
+      </AppStateProvider>,
+    );
+
+    expect(screen.queryByLabelText("Message Odin")).not.toBeInTheDocument();
+    useChatStore.getState().applyEvent({ type: "voice.wake", payload: { score: 0.9 } });
+    expect(await screen.findByLabelText("Message Odin")).toBeInTheDocument();
+  });
 });

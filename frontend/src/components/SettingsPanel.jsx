@@ -526,6 +526,28 @@ ollama pull llama3.2`}</pre>
                 </span>
               )}
             </div>
+            <label className="toggle-row">
+              <input
+                type="checkbox"
+                checked={Boolean(settings?.wake_word)}
+                disabled={settingsLoading}
+                onChange={async (event) => {
+                  setError("");
+                  setSaveNotice("");
+                  try {
+                    await saveSettings({ wake_word: event.target.checked });
+                    setSaveNotice(
+                      event.target.checked
+                        ? "Wake word on — say \"hey Jarvis\" to summon Odin. macOS may ask for microphone access."
+                        : "Wake word off.",
+                    );
+                  } catch (err) {
+                    setError(err.message);
+                  }
+                }}
+              />
+              Wake word — Odin opens the chat dock when he hears the wake phrase
+            </label>
             {voiceStatus ? (
               <>
                 <dl className="settings-list">

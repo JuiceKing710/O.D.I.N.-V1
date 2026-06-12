@@ -5,6 +5,7 @@ const ACTIVITY_LIMIT = 30;
 const ACTIVITY_LABELS = {
   "chat.message": "Reasoning Engine",
   "voice.state": "Voice Interface",
+  "voice.wake": "Wake Word",
   "task.updated": "Automation Hub",
   "backup.completed": "Recovery Core",
   "backup.failed": "Recovery Core",
@@ -20,6 +21,9 @@ function describeEvent(event) {
   }
   if (event.type === "voice.state") {
     return `Voice ${event.payload.state || "idle"}`;
+  }
+  if (event.type === "voice.wake") {
+    return "Wake word heard — Odin is listening";
   }
   if (event.type === "task.updated") {
     const task = event.payload.task || {};

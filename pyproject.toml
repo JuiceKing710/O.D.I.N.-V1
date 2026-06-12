@@ -24,6 +24,11 @@ dev = [
 vector = [
   "chromadb>=0.5",
 ]
+voice = [
+  "openwakeword>=0.6",
+  "piper-tts>=1.2",
+  "sounddevice>=0.5",
+]
 
 [tool.setuptools.packages.find]
 include = ["jarvis*"]

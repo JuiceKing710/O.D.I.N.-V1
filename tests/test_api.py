@@ -23,6 +23,7 @@ from jarvis.backend.core.app_factory import (
     get_settings_store,
     get_system_monitor,
     get_voice_manager,
+    get_wake_word_listener,
 )
 from jarvis.backend.core.system_monitor import SystemMonitor
 from jarvis.backend.core.backup_scheduler import BackupScheduler
@@ -114,6 +115,18 @@ class ApiTests(unittest.TestCase):
         )
         self.backup_scheduler = BackupScheduler(self.recovery, self.event_bus)
         self.voice = VoiceManager(event_bus=self.event_bus)
+
+        class StubWakeListener:
+            def __init__(self) -> None:
+                self.started = False
+
+            def start(self) -> None:
+                self.started = True
+
+            def stop(self) -> None:
+                self.started = False
+
+        self.wake_listener = StubWakeListener()
         app = create_app()
         app.dependency_overrides[get_core] = lambda: self.core
         app.dependency_overrides[get_event_bus] = lambda: self.event_bus
@@ -121,6 +134,7 @@ class ApiTests(unittest.TestCase):
         app.dependency_overrides[get_recovery_manager] = lambda: self.recovery
         app.dependency_overrides[get_backup_scheduler] = lambda: self.backup_scheduler
         app.dependency_overrides[get_settings_store] = lambda: self.settings
+        app.dependency_overrides[get_wake_word_listener] = lambda: self.wake_listener
         app.dependency_overrides[get_system_monitor] = lambda: SystemMonitor()
         app.dependency_overrides[get_voice_manager] = lambda: self.voice
         self.client = TestClient(app)
@@ -258,6 +272,16 @@ class ApiTests(unittest.TestCase):
 
         self.assertTrue(resolved.json()["result"]["ok"])
         self.assertEqual(target.read_text(encoding="utf-8"), "approved\n")
+
+    def test_settings_wake_word_toggle_starts_and_stops_listener(self) -> None:
+        enabled = self.client.put("/api/v1/settings", json={"wake_word": True})
+        self.assertEqual(enabled.status_code, 200)
+        self.assertTrue(enabled.json()["wake_word"])
+        self.assertTrue(self.wake_listener.started)
+
+        disabled = self.client.put("/api/v1/settings", json={"wake_word": False})
+        self.assertFalse(disabled.json()["wake_word"])
+        self.assertFalse(self.wake_listener.started)
 
     def test_settings_turbo_round_trip_masks_api_key(self) -> None:
         update = self.client.put(

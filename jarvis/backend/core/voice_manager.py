@@ -148,6 +148,40 @@ class WhisperCliSpeechToTextAdapter:
         return transcript
 
 
+class PiperTextToSpeechAdapter:
+    """Neural text-to-speech through a local Piper voice model."""
+
+    name = "piper"
+    configured = True
+
+    def __init__(self, piper_binary: str, model_path: Path | str, output_dir: Path | str) -> None:
+        self.piper_binary = piper_binary
+        self.model_path = Path(model_path)
+        self.output_dir = Path(output_dir)
+
+    @classmethod
+    def available(cls, piper_binary: str | None, model_path: Path) -> bool:
+        return bool(piper_binary) and model_path.is_file()
+
+    def synthesize(self, text: str, voice_name: str | None = None) -> Path:
+        cleaned = text.strip()
+        if not cleaned:
+            raise RuntimeError("Text is required for speech synthesis")
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        target = self.output_dir / f"jarvis-{uuid.uuid4().hex}.wav"
+        result = subprocess.run(
+            [self.piper_binary, "-m", str(self.model_path), "-f", str(target)],
+            input=cleaned,
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=120,
+        )
+        if result.returncode != 0 or not target.is_file():
+            raise RuntimeError(result.stderr.strip() or "Piper speech synthesis failed")
+        return target
+
+
 class MacOSTextToSpeechAdapter:
     name = "macos-say"
     configured = True

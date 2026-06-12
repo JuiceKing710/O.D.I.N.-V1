@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import secrets
 import shutil
+import sys
 import threading
 from functools import lru_cache
 from pathlib import Path
@@ -28,9 +29,11 @@ from jarvis.backend.core.vector_store import (
     SqliteVectorStore,
     VectorStoreInterface,
 )
+from jarvis.backend.core.wake_word import WakeWordListener
 from jarvis.backend.core.voice_manager import (
     CommandTextToSpeechAdapter,
     MacOSTextToSpeechAdapter,
+    PiperTextToSpeechAdapter,
     UnconfiguredSpeechToTextAdapter,
     UnconfiguredTextToSpeechAdapter,
     VoiceManager,
@@ -63,6 +66,11 @@ def _ollama_timeout_seconds() -> float:
         return float(raw)
     except ValueError:
         return 120.0
+
+
+def _venv_binary(name: str) -> str | None:
+    candidate = Path(sys.executable).parent / name
+    return str(candidate) if candidate.is_file() else None
 
 
 def _env_int(name: str, default: int) -> int:
@@ -100,6 +108,19 @@ def get_settings_store() -> SettingsStore:
 @lru_cache(maxsize=1)
 def get_event_bus() -> EventBus:
     return EventBus()
+
+
+@lru_cache(maxsize=1)
+def get_wake_word_listener() -> WakeWordListener:
+    try:
+        threshold = float(os.environ.get("JARVIS_WAKE_THRESHOLD", "0.5"))
+    except ValueError:
+        threshold = 0.5
+    return WakeWordListener(
+        get_event_bus(),
+        model_name=os.environ.get("JARVIS_WAKE_MODEL", "hey_jarvis"),
+        threshold=threshold,
+    )
 
 
 @lru_cache(maxsize=1)
@@ -199,8 +220,17 @@ def get_voice_manager() -> VoiceManager:
         stt_adapter = WhisperCliSpeechToTextAdapter(whisper_cli, whisper_model, ffmpeg)
     else:
         stt_adapter = UnconfiguredSpeechToTextAdapter()
+    piper_binary = shutil.which("piper") or _venv_binary("piper")
+    piper_model = Path(
+        os.environ.get(
+            "JARVIS_PIPER_VOICE",
+            str(Path.home() / "jarvis-models" / "piper" / "en_US-ryan-medium.onnx"),
+        )
+    )
     if tts_command:
         tts_adapter = CommandTextToSpeechAdapter(tts_command, voice_output_dir)
+    elif PiperTextToSpeechAdapter.available(piper_binary, piper_model):
+        tts_adapter = PiperTextToSpeechAdapter(piper_binary, piper_model, voice_output_dir)
     elif MacOSTextToSpeechAdapter.available():
         tts_adapter = MacOSTextToSpeechAdapter(voice_output_dir)
     else:
