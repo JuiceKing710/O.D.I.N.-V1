@@ -16,11 +16,18 @@ from jarvis.backend.core.bot_manager import BotManager
 from jarvis.backend.core.event_bus import EventBus
 from jarvis.backend.core.jarvis_core import JarvisCore
 from jarvis.backend.core.lm_provider import EchoLMProvider, OllamaProvider, TurboSwitchProvider
+from jarvis.backend.core.memory_consolidator import MemoryConsolidator
 from jarvis.backend.core.memory_manager import MemoryManager
 from jarvis.backend.core.recovery_manager import RecoveryManager
 from jarvis.backend.core.settings_store import SettingsStore
 from jarvis.backend.core.system_monitor import SystemMonitor
-from jarvis.backend.core.vector_store import ChromaVectorStore, NullVectorStore, VectorStoreInterface
+from jarvis.backend.core.vector_store import (
+    ChromaVectorStore,
+    NullVectorStore,
+    OllamaEmbedder,
+    SqliteVectorStore,
+    VectorStoreInterface,
+)
 from jarvis.backend.core.voice_manager import (
     CommandTextToSpeechAdapter,
     MacOSTextToSpeechAdapter,
@@ -96,6 +103,19 @@ def get_event_bus() -> EventBus:
 
 
 @lru_cache(maxsize=1)
+def get_memory_consolidator() -> MemoryConsolidator:
+    core = get_core()
+    return MemoryConsolidator(
+        core.memory,
+        core.lm_provider,
+        get_settings_store(),
+        get_event_bus(),
+        hour=_env_int("JARVIS_CONSOLIDATION_HOUR", 4),
+        enabled=os.environ.get("JARVIS_CONSOLIDATION", "enabled").lower() != "disabled",
+    )
+
+
+@lru_cache(maxsize=1)
 def get_system_monitor() -> SystemMonitor:
     try:
         interval = float(os.environ.get("JARVIS_METRICS_INTERVAL_SECONDS", "2"))
@@ -116,13 +136,21 @@ def get_db_lock() -> threading.RLock:
 
 @lru_cache(maxsize=1)
 def get_vector_store() -> VectorStoreInterface:
+    provider = os.environ.get("JARVIS_VECTOR_PROVIDER", "local").strip().lower()
+    if provider == "disabled":
+        return NullVectorStore()
     chroma_path = os.environ.get("JARVIS_CHROMA_PATH")
-    if not chroma_path:
-        return NullVectorStore()
-    try:
-        return ChromaVectorStore(chroma_path)
-    except RuntimeError:
-        return NullVectorStore()
+    if chroma_path:
+        try:
+            return ChromaVectorStore(chroma_path)
+        except RuntimeError:
+            return NullVectorStore()
+    embedder = OllamaEmbedder(
+        base_url=os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434"),
+        model=os.environ.get("JARVIS_EMBED_MODEL", "nomic-embed-text"),
+    )
+    vector_db = Path(os.environ.get("JARVIS_VECTOR_DB_PATH", "data/vectors.db"))
+    return SqliteVectorStore(vector_db, embedder=embedder)
 
 
 @lru_cache(maxsize=1)

@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Callable
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 def _migration_1(connection: sqlite3.Connection) -> None:
@@ -75,7 +75,22 @@ def _migration_1(connection: sqlite3.Connection) -> None:
     )
 
 
-MIGRATIONS: tuple[tuple[int, Callable[[sqlite3.Connection], None]], ...] = ((1, _migration_1),)
+def _migration_2(connection: sqlite3.Connection) -> None:
+    connection.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS memory_blocks (
+          label TEXT PRIMARY KEY,
+          content TEXT NOT NULL DEFAULT '',
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+        """
+    )
+
+
+MIGRATIONS: tuple[tuple[int, Callable[[sqlite3.Connection], None]], ...] = (
+    (1, _migration_1),
+    (2, _migration_2),
+)
 
 
 def run_migrations(connection: sqlite3.Connection) -> None:

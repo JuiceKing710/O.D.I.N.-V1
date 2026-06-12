@@ -70,6 +70,14 @@ class SystemOverviewResponse(BaseModel):
     nodes: dict[str, dict[str, Any]]
 
 
+class MemoryBlocksResponse(BaseModel):
+    blocks: dict[str, str]
+
+
+class MemoryBlockUpdateRequest(BaseModel):
+    content: str = ""
+
+
 class ConversationSummaryResponse(BaseModel):
     convo_id: int
     user_id: int

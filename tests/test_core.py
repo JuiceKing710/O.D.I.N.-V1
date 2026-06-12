@@ -369,7 +369,7 @@ class CoreTests(unittest.TestCase):
         with sqlite3.connect(self.memory.db_path) as connection:
             version = connection.execute("PRAGMA user_version").fetchone()[0]
 
-        self.assertEqual(version, 1)
+        self.assertEqual(version, 2)
 
     def test_full_backup_bundle_restores_settings_audit_and_vector_files(self) -> None:
         base = Path(self.tmp.name) / "bundle"
@@ -850,6 +850,114 @@ class CoreTests(unittest.TestCase):
         settings["turbo_mode"] = False
         local_status = asyncio.run(provider.status())
         self.assertEqual(local_status.provider, "builtin")
+
+    def test_memory_consolidation_extracts_facts_and_updates_profile(self) -> None:
+        from jarvis.backend.core.event_bus import EventBus
+        from jarvis.backend.core.memory_consolidator import MemoryConsolidator
+        from jarvis.backend.core.settings_store import SettingsStore
+
+        class ConsolidatingProvider(EchoLMProvider):
+            async def generate(self, text, context, metadata=None, history=None):
+                if "extract durable facts" in text.lower():
+                    return "- Zeb rides a black Yamaha MT-07\n- Zeb is building O.D.I.N.\nNOTHING"
+                if "merge" in text.lower():
+                    return "Zeb rides a black Yamaha MT-07 and is building O.D.I.N."
+                return "ok"
+
+        user = self.memory.get_or_create_user("zeb")
+        convo = self.memory.create_conversation(user.user_id, title="bikes")
+        self.memory.add_message(convo.convo_id, "user", "my bike is a black Yamaha MT-07")
+        self.memory.add_message(convo.convo_id, "assistant", "Noted.")
+
+        bus = EventBus()
+        settings = SettingsStore(Path(self.tmp.name) / "consolidator-settings.json")
+        consolidator = MemoryConsolidator(
+            self.memory, ConsolidatingProvider(), settings, bus
+        )
+        result = asyncio.run(consolidator.consolidate("zeb"))
+
+        self.assertEqual(result["facts_saved"], 2)
+        self.assertTrue(result["profile_updated"])
+        documents = self.memory.list_documents(user.user_id)
+        self.assertEqual(len(documents), 2)
+        self.assertTrue(all(doc.source.startswith("consolidated:") for doc in documents))
+        self.assertIn("Yamaha", self.memory.get_memory_blocks()["human"])
+        self.assertIn("memory.consolidated", [event.type for event in bus.history()])
+        self.assertTrue(settings.read()["last_consolidation_at"])
+
+        second = asyncio.run(consolidator.consolidate("zeb"))
+        self.assertTrue(second["skipped"])
+
+    def test_memory_blocks_default_update_and_reach_the_prompt(self) -> None:
+        blocks = self.memory.get_memory_blocks()
+        self.assertIn("persona", blocks)
+        self.assertEqual(blocks["human"], "")
+
+        self.memory.update_memory_block("human", "Zeb rides a black Yamaha MT-07.")
+        with self.assertRaises(ValueError):
+            self.memory.update_memory_block("unknown", "nope")
+
+        captured = {}
+
+        class RecordingProvider(EchoLMProvider):
+            async def generate_stream(self, text, context, metadata=None, history=None):
+                captured["context"] = context
+                yield "ok"
+
+        core = self._build_core(RecordingProvider())
+        asyncio.run(core.handle_message("hello there", "zeb"))
+
+        joined = "\n".join(captured["context"])
+        self.assertIn("[Odin persona]", joined)
+        self.assertIn("[About the user] Zeb rides a black Yamaha MT-07.", joined)
+
+    def test_sqlite_vector_store_recalls_by_meaning_not_keywords(self) -> None:
+        from jarvis.backend.core.vector_store import SqliteVectorStore
+
+        vocabulary = {
+            "motorcycle": [1.0, 0.0, 0.0],
+            "bike": [0.96, 0.1, 0.0],
+            "weather": [0.0, 1.0, 0.0],
+            "groceries": [0.0, 0.0, 1.0],
+        }
+
+        def fake_embedder(text: str) -> list[float]:
+            for word, vector in vocabulary.items():
+                if word in text.lower():
+                    return vector
+            return [0.1, 0.1, 0.1]
+
+        store = SqliteVectorStore(Path(self.tmp.name) / "vectors.db", embedder=fake_embedder)
+        store.upsert_message(1, "my motorcycle is a black Yamaha", {"convo": 1})
+        store.upsert_message(2, "the weather is cloudy today", {"convo": 1})
+        store.upsert_message(3, "buy groceries on Sunday", {"convo": 2})
+
+        results = store.query("messages", "what bike do I ride?", limit=2)
+
+        self.assertEqual(results[0].record_id, "message:1")
+        self.assertIn("Yamaha", results[0].content)
+        self.assertGreater(results[0].score, results[1].score)
+
+        store.delete("messages", "message:1")
+        self.assertNotIn(
+            "message:1",
+            [row.record_id for row in store.query("messages", "motorcycle", limit=5)],
+        )
+        health = store.health()
+        self.assertEqual(health["provider"], "sqlite-local")
+        self.assertEqual(health["collections"], {"messages": 2})
+
+    def test_sqlite_vector_store_degrades_gracefully_without_embedder(self) -> None:
+        from jarvis.backend.core.vector_store import SqliteVectorStore
+
+        def broken_embedder(text: str) -> list[float]:
+            raise RuntimeError("Embedding request failed: Ollama is down")
+
+        store = SqliteVectorStore(Path(self.tmp.name) / "vectors.db", embedder=broken_embedder)
+
+        self.assertIsNone(store.upsert_message(1, "hello world", {}))
+        self.assertEqual(store.query("messages", "hello", limit=3), [])
+        self.assertIn("Ollama is down", store.health()["last_error"])
 
     def test_persisted_model_name_ignores_default_and_blank_values(self) -> None:
         store = SettingsStore(Path(self.tmp.name) / "model-settings.json")

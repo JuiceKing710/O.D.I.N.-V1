@@ -153,6 +153,17 @@ export function deleteConversation(conversationId, username = "local-user") {
   );
 }
 
+export function fetchMemoryBlocks() {
+  return request("/api/v1/memory/blocks");
+}
+
+export function updateMemoryBlock(label, content) {
+  return request(`/api/v1/memory/blocks/${encodeURIComponent(label)}`, {
+    method: "PUT",
+    body: JSON.stringify({ content }),
+  });
+}
+
 export function fetchMemoryDocuments(username = "local-user") {
   return request(`/api/v1/memory/documents?username=${encodeURIComponent(username)}`);
 }

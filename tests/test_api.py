@@ -405,6 +405,47 @@ class ApiTests(unittest.TestCase):
         documents = self.memory.query_documents(user.user_id, "Summarize", 5)
         self.assertEqual(documents[0].source, f"conversation:{created.json()['conversation_id']}")
 
+    def test_memory_consolidate_endpoint_runs_and_reports(self) -> None:
+        from jarvis.backend.core.app_factory import get_memory_consolidator
+        from jarvis.backend.core.memory_consolidator import MemoryConsolidator
+
+        class FactProvider(EchoLMProvider):
+            async def generate(self, text, context, metadata=None, history=None):
+                if "extract durable facts" in text.lower():
+                    return "- The user tests O.D.I.N. daily"
+                return "The user tests O.D.I.N. daily."
+
+        self.client.post(
+            "/api/v1/chat",
+            json={"message": "I test O.D.I.N. every day", "username": "local-user"},
+        )
+        consolidator = MemoryConsolidator(
+            self.memory, FactProvider(), self.settings, self.event_bus
+        )
+        self.client.app.dependency_overrides[get_memory_consolidator] = lambda: consolidator
+
+        response = self.client.post("/api/v1/memory/consolidate")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["facts_saved"], 1)
+        self.assertFalse(body["skipped"])
+
+    def test_memory_blocks_round_trip(self) -> None:
+        initial = self.client.get("/api/v1/memory/blocks")
+        self.assertEqual(initial.status_code, 200)
+        self.assertIn("persona", initial.json()["blocks"])
+
+        updated = self.client.put(
+            "/api/v1/memory/blocks/human",
+            json={"content": "Zeb is building O.D.I.N."},
+        )
+        self.assertEqual(updated.status_code, 200)
+        self.assertEqual(updated.json()["blocks"]["human"], "Zeb is building O.D.I.N.")
+
+        rejected = self.client.put("/api/v1/memory/blocks/bogus", json={"content": "x"})
+        self.assertEqual(rejected.status_code, 400)
+
     def test_memory_status_reports_vector_provider(self) -> None:
         response = self.client.get("/api/v1/memory/status")
 

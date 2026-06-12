@@ -50,7 +50,9 @@ class JarvisCore:
         if bot_reply is not None:
             reply = bot_reply
         else:
-            context = self.memory.query_context(user.user_id, normalized, limit=5)
+            context = self.memory.memory_block_context() + self.memory.query_context(
+                user.user_id, normalized, limit=5
+            )
             history = self._conversation_history(convo.convo_id)
             reply = await self._generate_streaming(
                 normalized, context, history, convo.convo_id, metadata or {}

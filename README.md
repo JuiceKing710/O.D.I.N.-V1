@@ -56,7 +56,16 @@ When `OLLAMA_MODEL` is not set, Jarvis uses the model last loaded from Settings 
 (persisted in `data/settings.json`), and otherwise auto-selects the first installed chat
 model, skipping embedding-only models such as `nomic-embed-text`.
 
-Enable persistent vector memory with:
+Semantic long-term memory is on by default: every message and memory document is embedded
+through Ollama's `nomic-embed-text` model into `data/vectors.db` and recalled by meaning across
+conversations. Core memory blocks (Odin's persona and a profile of you) are always included in
+the prompt and editable under Data Map → Core Memory. A sleep-time consolidation job runs daily
+at 4:30 AM (and on demand via `POST /api/v1/memory/consolidate`), distilling recent conversations
+into durable facts and refreshing the profile. Configure with `JARVIS_EMBED_MODEL`,
+`JARVIS_VECTOR_DB_PATH`, `JARVIS_VECTOR_PROVIDER=disabled`, `JARVIS_CONSOLIDATION_HOUR`, or
+`JARVIS_CONSOLIDATION=disabled`.
+
+ChromaDB remains available as an alternative vector backend:
 
 ```bash
 pip install -e ".[vector]"

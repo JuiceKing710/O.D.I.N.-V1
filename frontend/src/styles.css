@@ -2836,3 +2836,57 @@ textarea:focus-visible {
 .dock-message.streaming p {
   color: var(--odin-text);
 }
+
+/* Core memory editor */
+
+.memory-block {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.memory-block label {
+  display: grid;
+  gap: 6px;
+  color: var(--odin-text-dim);
+  font-size: 0.72rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.memory-block textarea {
+  padding: 10px 12px;
+  color: var(--odin-text);
+  font-size: 0.84rem;
+  line-height: 1.5;
+  background: rgba(10, 16, 34, 0.8);
+  border: 1px solid var(--odin-line);
+  border-radius: 10px;
+  resize: vertical;
+}
+
+.memory-block textarea:focus {
+  outline: none;
+  border-color: var(--odin-line-strong);
+}
+
+.memory-block button {
+  justify-self: end;
+  padding: 7px 16px;
+  color: var(--odin-text);
+  background: rgba(56, 189, 248, 0.1);
+  border: 1px solid var(--odin-line-strong);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.memory-block button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.core-memory-section .notice {
+  margin: 0 0 10px;
+  color: var(--odin-green);
+  font-size: 0.76rem;
+}

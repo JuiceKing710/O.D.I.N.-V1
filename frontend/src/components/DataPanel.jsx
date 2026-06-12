@@ -5,28 +5,54 @@ import {
   exportConversation,
   fetchAuditEvents,
   fetchConversations,
+  fetchMemoryBlocks,
   fetchMemoryDocuments,
+  updateMemoryBlock,
 } from "../ipc/apiClient.js";
 import { useAppState } from "../state/appContext.jsx";
+
+const BLOCK_LABELS = {
+  persona: "Odin's persona",
+  human: "About you",
+};
 
 export function DataPanel() {
   const { currentUser } = useAppState();
   const [auditEvents, setAuditEvents] = useState([]);
   const [conversations, setConversations] = useState([]);
   const [documents, setDocuments] = useState([]);
+  const [blocks, setBlocks] = useState({});
+  const [blockDrafts, setBlockDrafts] = useState({});
+  const [blockNotice, setBlockNotice] = useState("");
   const [error, setError] = useState("");
 
   async function refresh() {
     setError("");
     try {
-      const [nextConversations, nextDocuments, nextAuditEvents] = await Promise.all([
+      const [nextConversations, nextDocuments, nextAuditEvents, nextBlocks] = await Promise.all([
         fetchConversations(currentUser.username),
         fetchMemoryDocuments(currentUser.username),
         fetchAuditEvents(),
+        fetchMemoryBlocks(),
       ]);
       setConversations(nextConversations);
       setDocuments(nextDocuments);
       setAuditEvents(nextAuditEvents);
+      setBlocks(nextBlocks.blocks);
+      setBlockDrafts(nextBlocks.blocks);
+    } catch (requestError) {
+      setError(requestError.message);
+    }
+  }
+
+  async function handleBlockSave(label) {
+    setBlockNotice("");
+    setError("");
+    try {
+      const response = await updateMemoryBlock(label, blockDrafts[label] || "");
+      setBlocks(response.blocks);
+      setBlockDrafts(response.blocks);
+      setBlockNotice(`${BLOCK_LABELS[label] || label} saved — Odin uses it in every reply.`);
     } catch (requestError) {
       setError(requestError.message);
     }
@@ -86,6 +112,36 @@ export function DataPanel() {
       </header>
       {error && <p className="error">{error}</p>}
       <div className="data-grid">
+        <section className="settings-section core-memory-section">
+          <div className="section-heading"><h2>Core Memory</h2><span>always in Odin's mind</span></div>
+          {blockNotice && <p className="notice">{blockNotice}</p>}
+          {Object.keys(BLOCK_LABELS).map((label) => (
+            <div key={label} className="memory-block">
+              <label>
+                {BLOCK_LABELS[label]}
+                <textarea
+                  rows={3}
+                  placeholder={
+                    label === "human"
+                      ? "Facts Odin should always know about you…"
+                      : "How Odin carries himself…"
+                  }
+                  value={blockDrafts[label] ?? ""}
+                  onChange={(event) =>
+                    setBlockDrafts((drafts) => ({ ...drafts, [label]: event.target.value }))
+                  }
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => handleBlockSave(label)}
+                disabled={(blockDrafts[label] ?? "") === (blocks[label] ?? "")}
+              >
+                Save
+              </button>
+            </div>
+          ))}
+        </section>
         <section className="settings-section">
           <div className="section-heading"><h2>Conversations</h2><span>{conversations.length}</span></div>
           <ul className="management-list">

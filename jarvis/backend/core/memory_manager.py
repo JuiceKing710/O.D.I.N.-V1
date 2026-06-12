@@ -383,6 +383,65 @@ class MemoryManager:
         context.extend(message.content for message in messages)
         return context[:limit]
 
+    def recent_messages(
+        self, user_id: int, since_iso: str, limit: int = 200
+    ) -> list[MessageRecord]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT m.msg_id, m.convo_id, m.role, m.content, m.embedding_id, m.created_at
+                FROM messages m
+                JOIN conversations c ON c.convo_id = m.convo_id
+                WHERE c.user_id = ? AND m.created_at > ? AND m.role IN ('user', 'assistant')
+                ORDER BY m.created_at ASC, m.msg_id ASC
+                LIMIT ?
+                """,
+                (user_id, since_iso, limit),
+            ).fetchall()
+        return [self._message_from_row(row) for row in rows]
+
+    DEFAULT_MEMORY_BLOCKS = {
+        "persona": (
+            "Odin is calm, direct, and loyal, with a dry wit. He keeps answers "
+            "concise and practical, and speaks plainly rather than formally."
+        ),
+        "human": "",
+    }
+
+    def get_memory_blocks(self) -> dict[str, str]:
+        with self._connect() as conn:
+            rows = conn.execute("SELECT label, content FROM memory_blocks").fetchall()
+        blocks = dict(self.DEFAULT_MEMORY_BLOCKS)
+        for row in rows:
+            blocks[row["label"]] = row["content"]
+        return blocks
+
+    def update_memory_block(self, label: str, content: str) -> dict[str, str]:
+        cleaned_label = label.strip().lower()
+        if cleaned_label not in self.DEFAULT_MEMORY_BLOCKS:
+            raise ValueError(
+                f"Unknown memory block '{label}'. "
+                f"Expected one of: {', '.join(sorted(self.DEFAULT_MEMORY_BLOCKS))}"
+            )
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO memory_blocks(label, content, updated_at)"
+                " VALUES (?, ?, CURRENT_TIMESTAMP)"
+                " ON CONFLICT(label) DO UPDATE SET"
+                " content = excluded.content, updated_at = CURRENT_TIMESTAMP",
+                (cleaned_label, content.strip()),
+            )
+        return self.get_memory_blocks()
+
+    def memory_block_context(self) -> list[str]:
+        blocks = self.get_memory_blocks()
+        context = []
+        if blocks.get("persona"):
+            context.append(f"[Odin persona] {blocks['persona']}")
+        if blocks.get("human"):
+            context.append(f"[About the user] {blocks['human']}")
+        return context
+
     def create_task(self, user_id: int, name: str, description: str | None = None) -> TaskRecord:
         if not name.strip():
             raise ValueError("task name is required")

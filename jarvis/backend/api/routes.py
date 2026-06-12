@@ -27,6 +27,8 @@ from jarvis.backend.api.models import (
     DocumentResponse,
     EventResponse,
     IntegrityResponse,
+    MemoryBlocksResponse,
+    MemoryBlockUpdateRequest,
     MemoryItem,
     MemoryQueryRequest,
     MemoryQueryResponse,
@@ -62,10 +64,12 @@ from jarvis.backend.core.app_factory import (
     get_event_bus,
     get_permission_manager,
     get_recovery_manager,
+    get_memory_consolidator,
     get_settings_store,
     get_system_monitor,
     get_voice_manager,
 )
+from jarvis.backend.core.memory_consolidator import MemoryConsolidator
 from jarvis.backend.core.backup_scheduler import BackupScheduler
 from jarvis.backend.core.bot_manager import BotMessage
 from jarvis.backend.core.event_bus import EventBus
@@ -292,6 +296,35 @@ def delete_conversation(
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return DeleteResponse(deleted=True, id=str(conversation_id))
+
+
+@router.get("/memory/blocks", response_model=MemoryBlocksResponse)
+def get_memory_blocks(core: JarvisCore = Depends(get_core)) -> MemoryBlocksResponse:
+    return MemoryBlocksResponse(blocks=core.memory.get_memory_blocks())
+
+
+@router.put("/memory/blocks/{label}", response_model=MemoryBlocksResponse)
+def update_memory_block(
+    label: str,
+    request: MemoryBlockUpdateRequest,
+    core: JarvisCore = Depends(get_core),
+) -> MemoryBlocksResponse:
+    try:
+        blocks = core.memory.update_memory_block(label, request.content)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return MemoryBlocksResponse(blocks=blocks)
+
+
+@router.post("/memory/consolidate", response_model=dict)
+async def consolidate_memory(
+    username: str = "local-user",
+    consolidator: MemoryConsolidator = Depends(get_memory_consolidator),
+) -> dict:
+    try:
+        return await consolidator.consolidate(username)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @router.get("/memory/documents", response_model=list[DocumentResponse])
