@@ -38,6 +38,9 @@ export function SettingsPanel() {
   const [saveNotice, setSaveNotice] = useState("");
   const [savingSettings, setSavingSettings] = useState(false);
   const [themeDraft, setThemeDraft] = useState("system");
+  const [turboDraft, setTurboDraft] = useState(false);
+  const [geminiKeyDraft, setGeminiKeyDraft] = useState("");
+  const [savingTurbo, setSavingTurbo] = useState(false);
   const [voiceStatus, setVoiceStatus] = useState(null);
   const [voiceTesting, setVoiceTesting] = useState(false);
   const [voiceSetupLoading, setVoiceSetupLoading] = useState(false);
@@ -149,6 +152,7 @@ export function SettingsPanel() {
     setPermissionDraft(settings.permissions || {});
     setThemeDraft(settings.theme);
     setVoiceModeDraft(settings.voice_mode);
+    setTurboDraft(Boolean(settings.turbo_mode));
   }, [settings]);
 
   async function handleModelSubmit(event) {
@@ -163,6 +167,45 @@ export function SettingsPanel() {
       setError("");
     } catch (err) {
       setError(err.message);
+    }
+  }
+
+  async function handleTurboSubmit(event) {
+    event.preventDefault();
+    setSavingTurbo(true);
+    setSaveNotice("");
+    setError("");
+    try {
+      const patch = { turbo_mode: turboDraft };
+      if (geminiKeyDraft.trim()) {
+        patch.gemini_api_key = geminiKeyDraft.trim();
+      }
+      await saveSettings(patch);
+      setGeminiKeyDraft("");
+      const response = await fetchModels();
+      setProvider(response.provider);
+      setSaveNotice(turboDraft ? "Turbo mode enabled." : "Turbo mode disabled — running local.");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSavingTurbo(false);
+    }
+  }
+
+  async function handleClearGeminiKey() {
+    setSavingTurbo(true);
+    setSaveNotice("");
+    setError("");
+    try {
+      await saveSettings({ turbo_mode: false, gemini_api_key: "" });
+      setGeminiKeyDraft("");
+      const response = await fetchModels();
+      setProvider(response.provider);
+      setSaveNotice("Gemini API key removed.");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSavingTurbo(false);
     }
   }
 
@@ -379,6 +422,59 @@ export function SettingsPanel() {
               <pre className="command-help">{`ollama serve
 ollama pull llama3.2`}</pre>
             )}
+          </section>
+
+          <section className="settings-section" aria-label="Turbo mode">
+            <div className="section-heading">
+              <h2>Turbo Mode</h2>
+              <span className={settings?.turbo_mode ? "status-ok" : "status-muted"}>
+                {settings?.turbo_mode ? "Cloud · Gemini" : "Local · Ollama"}
+              </span>
+            </div>
+            <p className="section-hint">
+              Turbo answers through Google Gemini for faster responses. Messages leave this
+              machine while it is on. If the cloud is unreachable, O.D.I.N. automatically
+              falls back to the local model, so offline use keeps working.
+            </p>
+            <form className="settings-form" onSubmit={handleTurboSubmit}>
+              <label className="toggle-row">
+                <input
+                  type="checkbox"
+                  checked={turboDraft}
+                  onChange={(event) => setTurboDraft(event.target.checked)}
+                />
+                Turbo responses
+              </label>
+              <label>
+                Gemini API key
+                <input
+                  type="password"
+                  autoComplete="off"
+                  placeholder={
+                    settings?.gemini_api_key_set ? "Key saved — enter to replace" : "Paste API key"
+                  }
+                  value={geminiKeyDraft}
+                  onChange={(event) => setGeminiKeyDraft(event.target.value)}
+                />
+              </label>
+              <div className="inline-form">
+                <button
+                  type="submit"
+                  disabled={
+                    savingTurbo ||
+                    settingsLoading ||
+                    (turboDraft && !settings?.gemini_api_key_set && !geminiKeyDraft.trim())
+                  }
+                >
+                  {savingTurbo ? "Saving" : "Save"}
+                </button>
+                {settings?.gemini_api_key_set && (
+                  <button type="button" onClick={handleClearGeminiKey} disabled={savingTurbo}>
+                    Remove key
+                  </button>
+                )}
+              </div>
+            </form>
           </section>
 
           <section className="settings-section" aria-label="Interface settings">

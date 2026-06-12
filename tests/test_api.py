@@ -259,6 +259,22 @@ class ApiTests(unittest.TestCase):
         self.assertTrue(resolved.json()["result"]["ok"])
         self.assertEqual(target.read_text(encoding="utf-8"), "approved\n")
 
+    def test_settings_turbo_round_trip_masks_api_key(self) -> None:
+        update = self.client.put(
+            "/api/v1/settings",
+            json={"turbo_mode": True, "gemini_api_key": "secret-key"},
+        )
+
+        self.assertEqual(update.status_code, 200)
+        body = update.json()
+        self.assertTrue(body["turbo_mode"])
+        self.assertTrue(body["gemini_api_key_set"])
+        self.assertNotIn("gemini_api_key", body)
+        self.assertEqual(self.settings.read()["gemini_api_key"], "secret-key")
+
+        cleared = self.client.put("/api/v1/settings", json={"gemini_api_key": ""})
+        self.assertFalse(cleared.json()["gemini_api_key_set"])
+
     def test_settings_round_trip(self) -> None:
         updated = self.client.put("/api/v1/settings", json={"theme": "dark"})
         self.assertEqual(updated.status_code, 200)

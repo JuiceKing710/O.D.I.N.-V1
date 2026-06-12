@@ -74,10 +74,10 @@ textarea {
   place-items: center;
   min-height: 100vh;
   overflow: hidden;
-  color: #fff6df;
+  color: var(--odin-text);
   background:
-    radial-gradient(circle at center, rgba(255, 147, 31, 0.16), transparent 42%),
-    #050505;
+    radial-gradient(circle at center, rgba(99, 102, 241, 0.18), transparent 46%),
+    #030511;
 }
 
 .core-focus-header {
@@ -2564,4 +2564,60 @@ textarea:focus-visible {
   .rail-card {
     flex: 1 1 240px;
   }
+}
+
+/* Turbo mode section */
+
+.section-hint {
+  margin: 0 0 10px;
+  color: var(--odin-text-dim);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.toggle-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  cursor: pointer;
+}
+
+.toggle-row input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--odin-cyan);
+}
+
+.status-muted {
+  color: var(--odin-text-dim);
+  font-size: 0.74rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* Rune core (Core Focus reactor) */
+
+.rune-core {
+  position: relative;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  width: min(86vmin, 880px);
+  aspect-ratio: 1;
+}
+
+.rune-core canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.rune-core .core-state {
+  position: absolute;
+  bottom: 4%;
+  color: var(--odin-text-dim);
+  font-size: 0.8rem;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
 }

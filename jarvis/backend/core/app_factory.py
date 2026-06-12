@@ -15,7 +15,7 @@ from jarvis.backend.core.backup_scheduler import BackupScheduler
 from jarvis.backend.core.bot_manager import BotManager
 from jarvis.backend.core.event_bus import EventBus
 from jarvis.backend.core.jarvis_core import JarvisCore
-from jarvis.backend.core.lm_provider import EchoLMProvider, OllamaProvider
+from jarvis.backend.core.lm_provider import EchoLMProvider, OllamaProvider, TurboSwitchProvider
 from jarvis.backend.core.memory_manager import MemoryManager
 from jarvis.backend.core.recovery_manager import RecoveryManager
 from jarvis.backend.core.settings_store import SettingsStore
@@ -211,13 +211,18 @@ def get_core() -> JarvisCore:
     bot_manager.register(SystemBot(permission_manager, audit_logger))
 
     if os.environ.get("JARVIS_LLM_PROVIDER") == "echo":
-        lm_provider = EchoLMProvider()
+        local_provider: EchoLMProvider | OllamaProvider = EchoLMProvider()
     else:
-        lm_provider = OllamaProvider(
+        local_provider = OllamaProvider(
             base_url=os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434"),
             model=os.environ.get("OLLAMA_MODEL") or _persisted_model_name(get_settings_store()),
             timeout_seconds=_ollama_timeout_seconds(),
         )
+    lm_provider = TurboSwitchProvider(
+        local_provider,
+        get_settings_store().read,
+        gemini_model=os.environ.get("GEMINI_MODEL", "gemini-2.5-flash"),
+    )
     return JarvisCore(
         memory=memory,
         bot_manager=bot_manager,

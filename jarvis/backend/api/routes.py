@@ -91,6 +91,8 @@ def _settings_response(
     stored_permissions = data.get("permissions") or {}
     permission_manager.update_decisions(stored_permissions)
     data["permissions"] = permission_manager.as_settings()
+    data["gemini_api_key_set"] = bool(str(data.get("gemini_api_key") or "").strip())
+    data.pop("gemini_api_key", None)
     return SettingsResponse(**data)
 
 

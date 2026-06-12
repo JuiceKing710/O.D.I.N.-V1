@@ -128,6 +128,8 @@ class SettingsResponse(BaseModel):
     model_name: str = "local-default"
     theme: str = "system"
     permissions: dict[str, str] = Field(default_factory=dict)
+    turbo_mode: bool = False
+    gemini_api_key_set: bool = False
 
 
 class SettingsUpdateRequest(BaseModel):
@@ -135,6 +137,8 @@ class SettingsUpdateRequest(BaseModel):
     model_name: str | None = None
     theme: Literal["system", "dark", "light"] | None = None
     permissions: dict[str, Literal["allowed", "denied", "prompt"]] | None = None
+    turbo_mode: bool | None = None
+    gemini_api_key: str | None = None
 
 
 class PermissionRequestResponse(BaseModel):

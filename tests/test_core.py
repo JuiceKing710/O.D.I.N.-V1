@@ -23,7 +23,12 @@ from jarvis.backend.core.settings_store import SettingsStore
 from jarvis.backend.core.backup_scheduler import BackupScheduler
 from jarvis.backend.core.bot_manager import BotManager, BotMessage
 from jarvis.backend.core.jarvis_core import JarvisCore
-from jarvis.backend.core.lm_provider import EchoLMProvider, OllamaProvider
+from jarvis.backend.core.lm_provider import (
+    EchoLMProvider,
+    GeminiProvider,
+    OllamaProvider,
+    TurboSwitchProvider,
+)
 from jarvis.backend.core.memory_manager import MemoryManager
 from jarvis.backend.core.recovery_manager import RecoveryManager
 from jarvis.backend.core.vector_store import InMemoryVectorStore, NullVectorStore, VectorStoreInterface
@@ -648,6 +653,63 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(history_types, ["chat.message"])
         self.assertEqual(queue.get_nowait().type, "system.metrics")
         self.assertEqual(queue.get_nowait().type, "chat.message")
+
+    def test_gemini_provider_parses_reply_and_sends_key_header(self) -> None:
+        provider = GeminiProvider(api_key="test-key")
+        captured = {}
+
+        def fake_urlopen(request, timeout=None):
+            captured["url"] = request.full_url
+            captured["headers"] = dict(request.headers)
+            captured["payload"] = json.loads(request.data.decode("utf-8"))
+            return MockHttpResponse(
+                {
+                    "candidates": [
+                        {"content": {"parts": [{"text": "Greetings from the cloud."}]}}
+                    ]
+                }
+            )
+
+        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            reply = asyncio.run(provider.generate("hello", ["fact one"]))
+
+        self.assertEqual(reply, "Greetings from the cloud.")
+        self.assertIn("gemini-2.5-flash:generateContent", captured["url"])
+        self.assertEqual(captured["headers"].get("X-goog-api-key"), "test-key")
+        self.assertIn("O.D.I.N.", captured["payload"]["system_instruction"]["parts"][0]["text"])
+        self.assertIn("fact one", captured["payload"]["contents"][0]["parts"][0]["text"])
+
+    def test_turbo_switch_uses_gemini_when_enabled_and_falls_back_offline(self) -> None:
+        local = EchoLMProvider()
+        settings = {"turbo_mode": True, "gemini_api_key": "test-key"}
+        provider = TurboSwitchProvider(local, lambda: settings)
+
+        with patch(
+            "urllib.request.urlopen",
+            return_value=MockHttpResponse(
+                {"candidates": [{"content": {"parts": [{"text": "turbo reply"}]}}]}
+            ),
+        ):
+            reply = asyncio.run(provider.generate("hello", []))
+            status = asyncio.run(provider.status())
+
+        self.assertEqual(reply, "turbo reply")
+        self.assertEqual(status.provider, "gemini (turbo)")
+
+        import urllib.error
+
+        with patch(
+            "urllib.request.urlopen",
+            side_effect=urllib.error.URLError("no internet"),
+        ):
+            offline_reply = asyncio.run(provider.generate("hello offline", []))
+
+        self.assertIn("hello offline", offline_reply)
+        self.assertIn("no internet", provider.last_turbo_error)
+
+        settings["turbo_mode"] = False
+        local_status = asyncio.run(provider.status())
+        self.assertEqual(local_status.provider, "builtin")
 
     def test_persisted_model_name_ignores_default_and_blank_values(self) -> None:
         store = SettingsStore(Path(self.tmp.name) / "model-settings.json")

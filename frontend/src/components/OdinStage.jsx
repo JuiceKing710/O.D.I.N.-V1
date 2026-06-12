@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from "react";
-import odinHeadUrl from "../assets/odin-head.png";
+import { drawRuneReactor } from "./runeReactor.js";
 import { useChatStore } from "../state/chatStore.js";
 import { useSystemStore } from "../state/systemStore.js";
 import { sampleOdinEnergy } from "../state/odinPresence.js";
@@ -73,7 +73,6 @@ function drawFlowPath(ctx, path, color, dashOffset, width) {
 export function OdinStage() {
   const containerRef = useRef(null);
   const canvasRef = useRef(null);
-  const headMaskRef = useRef(null);
   const particlesRef = useRef([]);
   const voiceState = useChatStore((state) => state.voiceState);
   const voiceStateRef = useRef(voiceState);
@@ -91,32 +90,6 @@ export function OdinStage() {
     if (!canvas || !container || !ctx) {
       return undefined;
     }
-
-    const head = new Image();
-    head.src = odinHeadUrl;
-    head.onload = () => {
-      // Pre-mask the head with a radial alpha falloff so it melts into the stage.
-      const mask = document.createElement("canvas");
-      mask.width = head.width;
-      mask.height = head.height;
-      const maskCtx = mask.getContext("2d");
-      maskCtx.drawImage(head, 0, 0);
-      const gradient = maskCtx.createRadialGradient(
-        head.width / 2,
-        head.height * 0.46,
-        head.width * 0.18,
-        head.width / 2,
-        head.height * 0.5,
-        head.width * 0.62,
-      );
-      gradient.addColorStop(0, "rgba(0,0,0,1)");
-      gradient.addColorStop(0.78, "rgba(0,0,0,0.92)");
-      gradient.addColorStop(1, "rgba(0,0,0,0)");
-      maskCtx.globalCompositeOperation = "destination-in";
-      maskCtx.fillStyle = gradient;
-      maskCtx.fillRect(0, 0, mask.width, mask.height);
-      headMaskRef.current = mask;
-    };
 
     if (particlesRef.current.length === 0) {
       particlesRef.current = Array.from({ length: 90 }, () => ({
@@ -220,49 +193,24 @@ export function OdinStage() {
         ctx.fill();
       }
 
-      // Aura behind the head.
+      // Aura behind the reactor.
       const auraRadius = height * 0.3 * (1 + energy * 0.1);
       const aura = ctx.createRadialGradient(centerX, centerY, auraRadius * 0.2, centerX, centerY, auraRadius);
       const auraColor = mode === "listening" ? "56, 189, 248" : "99, 102, 241";
-      aura.addColorStop(0, `rgba(${auraColor}, ${0.32 + energy * 0.35})`);
+      aura.addColorStop(0, `rgba(${auraColor}, ${0.22 + energy * 0.3})`);
       aura.addColorStop(1, "rgba(8, 10, 26, 0)");
       ctx.fillStyle = aura;
       ctx.fillRect(centerX - auraRadius, centerY - auraRadius, auraRadius * 2, auraRadius * 2);
 
-      // Odin himself.
-      const headCanvas = headMaskRef.current;
-      if (headCanvas) {
-        const scale = (height * 0.62) / headCanvas.height;
-        const drawWidth = headCanvas.width * scale;
-        const drawHeight = headCanvas.height * scale;
-        ctx.save();
-        ctx.globalAlpha = 0.96;
-        ctx.drawImage(headCanvas, centerX - drawWidth / 2, centerY - drawHeight * 0.5, drawWidth, drawHeight);
-        ctx.restore();
-
-        // Eye glow that rides the speech energy.
-        const eyeY = centerY - drawHeight * 0.052;
-        const eyeOffset = drawWidth * 0.118;
-        for (const direction of [-1, 1]) {
-          const glow = ctx.createRadialGradient(
-            centerX + direction * eyeOffset,
-            eyeY,
-            0,
-            centerX + direction * eyeOffset,
-            eyeY,
-            drawWidth * (0.05 + energy * 0.07),
-          );
-          glow.addColorStop(0, `rgba(147, 197, 253, ${0.5 + energy * 0.5})`);
-          glow.addColorStop(1, "rgba(147, 197, 253, 0)");
-          ctx.save();
-          ctx.globalCompositeOperation = "lighter";
-          ctx.fillStyle = glow;
-          ctx.beginPath();
-          ctx.arc(centerX + direction * eyeOffset, eyeY, drawWidth * 0.14, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.restore();
-        }
-      }
+      // The rune reactor at the heart of the tree.
+      drawRuneReactor(ctx, {
+        centerX,
+        centerY,
+        radius: height * 0.24,
+        now,
+        energy,
+        mode,
+      });
 
       frame = window.requestAnimationFrame(render);
     }

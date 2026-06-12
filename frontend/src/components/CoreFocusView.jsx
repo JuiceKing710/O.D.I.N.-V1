@@ -1,5 +1,5 @@
 import React from "react";
-import { AICore } from "./AICore.jsx";
+import { RuneCore } from "./RuneCore.jsx";
 
 export function CoreFocusView({ messages, onExit, state }) {
   const ghostMessages = messages.slice(-6);
@@ -20,7 +20,7 @@ export function CoreFocusView({ messages, onExit, state }) {
           Exit
         </button>
       </header>
-      <AICore mode="focus" state={state} />
+      <RuneCore state={state} />
     </main>
   );
 }

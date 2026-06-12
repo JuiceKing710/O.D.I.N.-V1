@@ -10,6 +10,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "model_name": "local-default",
     "theme": "system",
     "permissions": {},
+    "turbo_mode": False,
 }
 
 
