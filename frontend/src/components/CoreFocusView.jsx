@@ -1,4 +1,5 @@
 import React from "react";
+import { ChatDock } from "./ChatDock.jsx";
 import { RuneCore } from "./RuneCore.jsx";
 
 export function CoreFocusView({ messages, onExit, state }) {
@@ -21,6 +22,7 @@ export function CoreFocusView({ messages, onExit, state }) {
         </button>
       </header>
       <RuneCore state={state} />
+      <ChatDock />
     </main>
   );
 }

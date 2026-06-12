@@ -1,6 +1,9 @@
 import React, { useEffect, useRef } from "react";
-import { drawRuneReactor } from "./runeReactor.js";
+import { createVegvisir } from "./vegvisir.js";
 import { sampleOdinEnergy } from "../state/odinPresence.js";
+import { buildStaveIntensities, useSystemStore } from "../state/systemStore.js";
+
+const FRAME_INTERVAL_MS = 33; // ~30fps is plenty for the compass glow
 
 export function RuneCore({ state = "idle" }) {
   const containerRef = useRef(null);
@@ -19,17 +22,25 @@ export function RuneCore({ state = "idle" }) {
       return undefined;
     }
 
+    const vegvisir = createVegvisir();
     let frame = 0;
     let smoothedEnergy = 0;
+    let lastDraw = 0;
 
     function resize() {
       const ratio = window.devicePixelRatio || 1;
       canvas.width = container.clientWidth * ratio;
       canvas.height = container.clientHeight * ratio;
       ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+      vegvisir.invalidate();
     }
 
     function render(now) {
+      if (now - lastDraw < FRAME_INTERVAL_MS) {
+        frame = window.requestAnimationFrame(render);
+        return;
+      }
+      lastDraw = now;
       const width = container.clientWidth;
       const height = container.clientHeight;
       const voice = stateRef.current;
@@ -44,14 +55,18 @@ export function RuneCore({ state = "idle" }) {
             : breathing;
       smoothedEnergy += (target - smoothedEnergy) * 0.18;
 
+      const { nodeActivity } = useSystemStore.getState();
+      const staves = buildStaveIntensities(nodeActivity, voice, Date.now());
+
       ctx.clearRect(0, 0, width, height);
-      drawRuneReactor(ctx, {
+      vegvisir.draw(ctx, {
         centerX: width / 2,
         centerY: height / 2,
         radius: Math.min(width, height) * 0.36,
         now,
         energy: smoothedEnergy,
         mode,
+        staves,
       });
       frame = window.requestAnimationFrame(render);
     }

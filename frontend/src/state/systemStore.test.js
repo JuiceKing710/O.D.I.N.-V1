@@ -1,5 +1,13 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { formatBytes, formatRate, formatUptime, useSystemStore } from "./systemStore.js";
+import {
+  branchIntensity,
+  buildStaveIntensities,
+  formatBytes,
+  formatRate,
+  formatUptime,
+  STAVE_SUBSYSTEMS,
+  useSystemStore,
+} from "./systemStore.js";
 import { useChatStore } from "./chatStore.js";
 
 describe("chatStore streaming", () => {
@@ -33,7 +41,7 @@ describe("chatStore streaming", () => {
 
 describe("systemStore", () => {
   beforeEach(() => {
-    useSystemStore.setState({ metrics: null, nodes: {}, activity: [] });
+    useSystemStore.setState({ metrics: null, nodes: {}, activity: [], nodeActivity: {} });
   });
 
   it("applies system.metrics events to live metrics", () => {
@@ -69,6 +77,36 @@ describe("systemStore", () => {
     expect(activity[1].source).toBe("Reasoning Engine");
     expect(activity[1].detail).toContain("All systems nominal.");
     expect(activity[0].source).toBe("Automation Hub");
+  });
+
+  it("stamps subsystem activity for branch lighting", () => {
+    const apply = useSystemStore.getState().applySystemEvent;
+    apply({ id: "evt-4", type: "voice.wake", created_at: new Date().toISOString(), payload: {} });
+    expect(useSystemStore.getState().nodeActivity.voice_interface).toBeTypeOf("number");
+
+    apply({ id: "evt-5", type: "chat.stream", created_at: new Date().toISOString(), payload: { delta: "Hi" } });
+    expect(useSystemStore.getState().nodeActivity.api_orchestrator).toBeTypeOf("number");
+    // chat.stream lights a stave but never lands in the activity feed.
+    expect(useSystemStore.getState().activity.every((item) => item.id !== "evt-5")).toBe(true);
+
+    apply({ id: "evt-6", type: "system.metrics", created_at: new Date().toISOString(), payload: { cpu_percent: 1 } });
+    expect(useSystemStore.getState().nodeActivity.system_heartbeat).toBeTypeOf("number");
+  });
+
+  it("decays branch intensity from full to dark", () => {
+    const now = Date.now();
+    expect(branchIntensity(now, now)).toBe(1);
+    expect(branchIntensity(now - 1800, now)).toBeCloseTo(Math.exp(-1), 5);
+    expect(branchIntensity(now - 10000, now)).toBe(0);
+    expect(branchIntensity(undefined, now)).toBe(0);
+  });
+
+  it("keeps the voice stave lit while Odin speaks", () => {
+    const now = Date.now();
+    const staves = buildStaveIntensities({}, "speaking", now);
+    expect(staves).toHaveLength(8);
+    expect(staves[STAVE_SUBSYSTEMS.indexOf("voice_interface")]).toBe(1);
+    expect(staves[STAVE_SUBSYSTEMS.indexOf("reasoning_engine")]).toBe(0);
   });
 
   it("formats bytes, rates, and uptime for the HUD", () => {

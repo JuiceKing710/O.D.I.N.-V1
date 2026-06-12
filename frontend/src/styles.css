@@ -2625,6 +2625,12 @@ textarea:focus-visible {
 
 /* Chat dock on the Odin stage */
 
+.core-focus-view .dock-toggle,
+.core-focus-view .chat-dock {
+  right: 28px;
+  bottom: 28px;
+}
+
 .dock-toggle {
   position: absolute;
   right: 22px;

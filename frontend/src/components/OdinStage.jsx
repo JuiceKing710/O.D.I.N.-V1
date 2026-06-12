@@ -1,8 +1,10 @@
 import React, { useEffect, useRef } from "react";
-import { drawRuneReactor } from "./runeReactor.js";
+import { createVegvisir } from "./vegvisir.js";
 import { useChatStore } from "../state/chatStore.js";
-import { useSystemStore } from "../state/systemStore.js";
+import { branchIntensity, buildStaveIntensities, useSystemStore } from "../state/systemStore.js";
 import { sampleOdinEnergy } from "../state/odinPresence.js";
+
+const FRAME_INTERVAL_MS = 33; // ~30fps cap for the whole stage
 
 const SOFTWARE_NODES = [
   { id: "reasoning_engine", title: "Reasoning Engine", x: 0.5, y: 0.04 },
@@ -58,15 +60,24 @@ function softwareValue(nodes, id) {
   return { label: node.label, ok: node.ok };
 }
 
-function drawFlowPath(ctx, path, color, dashOffset, width) {
+// Branches stay as a dim static skeleton until their subsystem is active, then
+// get a brighter animated pass that fades with the activity decay.
+function drawBranch(ctx, path, rgb, glow, dashOffset) {
   ctx.save();
-  ctx.strokeStyle = color;
-  ctx.lineWidth = width;
-  ctx.setLineDash([10, 14]);
-  ctx.lineDashOffset = dashOffset;
-  ctx.shadowColor = color;
-  ctx.shadowBlur = 8;
+  ctx.strokeStyle = `rgba(${rgb}, 0.1)`;
+  ctx.lineWidth = 1;
   ctx.stroke(path);
+  if (glow > 0.05) {
+    ctx.strokeStyle = `rgba(${rgb}, ${0.15 + glow * 0.55})`;
+    ctx.lineWidth = 1 + glow * 1.6;
+    ctx.setLineDash([10, 14]);
+    ctx.lineDashOffset = dashOffset;
+    if (glow > 0.3) {
+      ctx.shadowColor = `rgba(${rgb}, 0.9)`;
+      ctx.shadowBlur = 8;
+    }
+    ctx.stroke(path);
+  }
   ctx.restore();
 }
 
@@ -92,7 +103,7 @@ export function OdinStage() {
     }
 
     if (particlesRef.current.length === 0) {
-      particlesRef.current = Array.from({ length: 90 }, () => ({
+      particlesRef.current = Array.from({ length: 36 }, () => ({
         x: Math.random(),
         y: Math.random(),
         radius: 0.6 + Math.random() * 1.6,
@@ -103,17 +114,66 @@ export function OdinStage() {
       }));
     }
 
+    const vegvisir = createVegvisir();
     let frame = 0;
     let smoothedEnergy = 0;
+    let lastDraw = 0;
+    let softwarePaths = [];
+    let hardwarePaths = [];
+
+    // Branch geometry only depends on the container size, so the Path2D
+    // objects are rebuilt on resize instead of every frame.
+    function buildPaths(width, height) {
+      const centerX = width / 2;
+      const centerY = height * 0.46;
+      softwarePaths = SOFTWARE_NODES.map((node) => {
+        const targetX = node.x * width;
+        const targetY = node.y * height + 30;
+        const path = new Path2D();
+        path.moveTo(centerX, centerY - height * 0.1);
+        path.bezierCurveTo(
+          centerX + (targetX - centerX) * 0.2,
+          centerY - height * 0.28,
+          targetX + (centerX - targetX) * 0.25,
+          targetY + 60,
+          targetX,
+          targetY,
+        );
+        return { id: node.id, path, rgb: node.x < 0.5 ? "96, 165, 250" : "167, 139, 250" };
+      });
+      const hardwareSpan = Math.min(width * 0.86, 980);
+      hardwarePaths = HARDWARE_NODES.map((node, index) => {
+        const targetX = centerX - hardwareSpan / 2 + (hardwareSpan / (HARDWARE_NODES.length - 1)) * index;
+        const targetY = height * 0.94 - 46;
+        const path = new Path2D();
+        path.moveTo(centerX, centerY + height * 0.16);
+        path.bezierCurveTo(
+          centerX,
+          centerY + height * 0.3,
+          targetX,
+          targetY - height * 0.14,
+          targetX,
+          targetY,
+        );
+        return path;
+      });
+    }
 
     function resize() {
       const ratio = window.devicePixelRatio || 1;
       canvas.width = container.clientWidth * ratio;
       canvas.height = container.clientHeight * ratio;
       ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+      buildPaths(container.clientWidth, container.clientHeight);
+      vegvisir.invalidate();
     }
 
     function render(now) {
+      if (now - lastDraw < FRAME_INTERVAL_MS) {
+        frame = window.requestAnimationFrame(render);
+        return;
+      }
+      lastDraw = now;
       const width = container.clientWidth;
       const height = container.clientHeight;
       const centerX = width / 2;
@@ -141,40 +201,22 @@ export function OdinStage() {
       }
       ctx.restore();
 
-      // Branches up to software nodes, roots down to hardware nodes.
+      // Branches up to software nodes, roots down to hardware nodes — lit only
+      // while their subsystem has recent activity.
+      const nowMs = Date.now();
+      const { nodeActivity } = useSystemStore.getState();
       const dashOffset = -(now / 24);
-      for (const node of SOFTWARE_NODES) {
-        const targetX = node.x * width;
-        const targetY = node.y * height + 30;
-        const path = new Path2D();
-        path.moveTo(centerX, centerY - height * 0.1);
-        path.bezierCurveTo(
-          centerX + (targetX - centerX) * 0.2,
-          centerY - height * 0.28,
-          targetX + (centerX - targetX) * 0.25,
-          targetY + 60,
-          targetX,
-          targetY,
-        );
-        const cool = node.x < 0.5 ? "rgba(96, 165, 250," : "rgba(167, 139, 250,";
-        drawFlowPath(ctx, path, `${cool} ${0.3 + energy * 0.45})`, dashOffset, 1.4 + energy * 1.2);
+      for (const branch of softwarePaths) {
+        let glow = branchIntensity(nodeActivity[branch.id], nowMs);
+        if (branch.id === "voice_interface" && (voice === "speaking" || voice === "listening")) {
+          glow = 1;
+        }
+        drawBranch(ctx, branch.path, branch.rgb, glow, dashOffset);
       }
-      const hardwareSpan = Math.min(width * 0.86, 980);
-      HARDWARE_NODES.forEach((node, index) => {
-        const targetX = centerX - hardwareSpan / 2 + (hardwareSpan / (HARDWARE_NODES.length - 1)) * index;
-        const targetY = height * 0.94 - 46;
-        const path = new Path2D();
-        path.moveTo(centerX, centerY + height * 0.16);
-        path.bezierCurveTo(
-          centerX,
-          centerY + height * 0.3,
-          targetX,
-          targetY - height * 0.14,
-          targetX,
-          targetY,
-        );
-        drawFlowPath(ctx, path, `rgba(251, 191, 36, ${0.26 + energy * 0.4})`, -dashOffset, 1.3 + energy);
-      });
+      const heartbeat = branchIntensity(nodeActivity.system_heartbeat, nowMs);
+      for (const path of hardwarePaths) {
+        drawBranch(ctx, path, "251, 191, 36", heartbeat, -dashOffset);
+      }
 
       // Ambient particles: cool above, warm sparks below.
       for (const particle of particlesRef.current) {
@@ -202,14 +244,15 @@ export function OdinStage() {
       ctx.fillStyle = aura;
       ctx.fillRect(centerX - auraRadius, centerY - auraRadius, auraRadius * 2, auraRadius * 2);
 
-      // The rune reactor at the heart of the tree.
-      drawRuneReactor(ctx, {
+      // The Vegvisir compass at the heart of the tree.
+      vegvisir.draw(ctx, {
         centerX,
         centerY,
         radius: height * 0.24,
         now,
         energy,
         mode,
+        staves: buildStaveIntensities(nodeActivity, voice, nowMs),
       });
 
       frame = window.requestAnimationFrame(render);

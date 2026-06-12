@@ -14,6 +14,59 @@ const ACTIVITY_LABELS = {
   "bot.dispatched": "Automation Hub",
 };
 
+// Subsystems each event type touches, used to light up the matching
+// branches/staves. Includes events that never reach the activity list
+// (chat.stream, system.metrics).
+const EVENT_SUBSYSTEMS = {
+  "chat.message": ["reasoning_engine", "memory_layer"],
+  "chat.stream": ["api_orchestrator"],
+  "voice.state": ["voice_interface"],
+  "voice.wake": ["voice_interface"],
+  "task.updated": ["automation_hub"],
+  "bot.dispatched": ["automation_hub"],
+  "backup.completed": ["recovery_core"],
+  "backup.failed": ["recovery_core"],
+  "permission.requested": ["security_mesh"],
+  "permission.resolved": ["security_mesh"],
+  "system.metrics": ["system_heartbeat"],
+};
+
+// Vegvisir stave order, index 0 = North, clockwise.
+export const STAVE_SUBSYSTEMS = [
+  "reasoning_engine",
+  "automation_hub",
+  "api_orchestrator",
+  "security_mesh",
+  "system_heartbeat",
+  "recovery_core",
+  "voice_interface",
+  "memory_layer",
+];
+
+const ACTIVITY_TAU_MS = 1800;
+const ACTIVITY_FLOOR = 0.04;
+
+// 1.0 at the moment of activity, e-folding every 1.8s, fully dark after ~6s.
+// Expects Date.now()-based timestamps, not performance.now().
+export function branchIntensity(lastActiveMs, nowMs) {
+  if (!lastActiveMs) {
+    return 0;
+  }
+  const value = Math.exp(-Math.max(0, nowMs - lastActiveMs) / ACTIVITY_TAU_MS);
+  return value < ACTIVITY_FLOOR ? 0 : value;
+}
+
+// Per-stave brightness for the Vegvisir, in STAVE_SUBSYSTEMS order. The voice
+// stave stays fully lit while Odin is actively speaking or listening.
+export function buildStaveIntensities(nodeActivity, voiceState, nowMs) {
+  return STAVE_SUBSYSTEMS.map((id) => {
+    if (id === "voice_interface" && (voiceState === "speaking" || voiceState === "listening")) {
+      return 1;
+    }
+    return branchIntensity(nodeActivity?.[id], nowMs);
+  });
+}
+
 function describeEvent(event) {
   if (event.type === "chat.message") {
     const role = event.payload.role === "assistant" ? "O.D.I.N. replied" : "Heard you";
@@ -42,17 +95,27 @@ export const useSystemStore = create((set) => ({
   metrics: null,
   nodes: {},
   activity: [],
+  nodeActivity: {},
   setOverview: ({ metrics, nodes }) => set({ metrics, nodes }),
   applySystemEvent: (event) =>
     set((state) => {
+      const touched = EVENT_SUBSYSTEMS[event.type];
+      const stamp = {};
+      if (touched) {
+        const now = Date.now();
+        stamp.nodeActivity = { ...state.nodeActivity };
+        for (const id of touched) {
+          stamp.nodeActivity[id] = now;
+        }
+      }
       if (event.type === "system.metrics") {
-        return { metrics: event.payload };
+        return { ...stamp, metrics: event.payload };
       }
       if (!ACTIVITY_LABELS[event.type] && !event.type.startsWith("backup")) {
-        return {};
+        return stamp;
       }
       if (state.activity.some((item) => item.id === event.id)) {
-        return {};
+        return stamp;
       }
       const entry = {
         id: event.id,
@@ -60,7 +123,7 @@ export const useSystemStore = create((set) => ({
         detail: describeEvent(event),
         at: event.created_at,
       };
-      return { activity: [entry, ...state.activity].slice(0, ACTIVITY_LIMIT) };
+      return { ...stamp, activity: [entry, ...state.activity].slice(0, ACTIVITY_LIMIT) };
     }),
 }));
 
