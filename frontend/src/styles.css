@@ -523,6 +523,30 @@ textarea {
   border-radius: 8px;
 }
 
+.camera-preview {
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+  padding: 8px 0;
+}
+
+.camera-preview video {
+  width: 240px;
+  max-width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border-radius: 10px;
+  border: 1px solid rgba(120, 180, 255, 0.35);
+  background: #05070d;
+  transform: scaleX(-1);
+}
+
+.camera-caption {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #9fc6ff;
+}
+
 .dictation-preview {
   display: grid;
   gap: 4px;

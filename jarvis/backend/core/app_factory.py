@@ -29,6 +29,13 @@ from jarvis.backend.core.vector_store import (
     SqliteVectorStore,
     VectorStoreInterface,
 )
+from jarvis.backend.core.vision_manager import (
+    CommandVisionAdapter,
+    GeminiVisionAdapter,
+    OllamaVisionAdapter,
+    UnconfiguredVisionAdapter,
+    VisionManager,
+)
 from jarvis.backend.core.wake_word import WakeWordListener
 from jarvis.backend.core.voice_manager import (
     CommandTextToSpeechAdapter,
@@ -240,6 +247,37 @@ def get_voice_manager() -> VoiceManager:
         tts_adapter=tts_adapter,
         event_bus=get_event_bus(),
     )
+
+
+@lru_cache(maxsize=1)
+def get_vision_manager() -> VisionManager:
+    vision_command = os.environ.get("JARVIS_VISION_COMMAND")
+    ollama_base_url = os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+    settings = get_settings_store().read()
+    gemini_key = str(settings.get("gemini_api_key") or "").strip()
+    # Local-first: prefer the on-device Ollama vision model so camera frames
+    # never leave the machine and stay fast on modest hardware. moondream (~1.6 GB)
+    # is the default because it runs comfortably offline on an 8 GB Mac; a heavier
+    # model like llava is used only if moondream is not installed. Fall back to
+    # Gemini just when no local model is present and turbo mode is enabled.
+    preferred = os.environ.get("JARVIS_VISION_MODEL")
+    candidates = [preferred] if preferred else ["moondream", "llava"]
+    local_model = next(
+        (m for m in candidates if m and OllamaVisionAdapter.available(ollama_base_url, m)),
+        None,
+    )
+    if vision_command:
+        adapter = CommandVisionAdapter(vision_command)
+    elif local_model:
+        adapter = OllamaVisionAdapter(model=local_model, base_url=ollama_base_url)
+    elif settings.get("turbo_mode") and gemini_key:
+        adapter = GeminiVisionAdapter(
+            api_key=gemini_key,
+            model=os.environ.get("JARVIS_VISION_GEMINI_MODEL", "gemini-2.5-flash"),
+        )
+    else:
+        adapter = UnconfiguredVisionAdapter()
+    return VisionManager(adapter=adapter, event_bus=get_event_bus())
 
 
 @lru_cache(maxsize=1)

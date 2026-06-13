@@ -49,6 +49,9 @@ from jarvis.backend.api.models import (
     TaskCreateRequest,
     TaskResponse,
     TaskUpdateRequest,
+    VisionAnalyzeRequest,
+    VisionAnalyzeResponse,
+    VisionStatusResponse,
     VoiceStateRequest,
     VoiceStatusResponse,
     VoiceSynthesizeRequest,
@@ -67,6 +70,7 @@ from jarvis.backend.core.app_factory import (
     get_memory_consolidator,
     get_settings_store,
     get_system_monitor,
+    get_vision_manager,
     get_voice_manager,
     get_wake_word_listener,
 )
@@ -79,6 +83,7 @@ from jarvis.backend.core.jarvis_core import JarvisCore
 from jarvis.backend.core.recovery_manager import RecoveryManager
 from jarvis.backend.core.settings_store import SettingsStore
 from jarvis.backend.core.system_monitor import SystemMonitor
+from jarvis.backend.core.vision_manager import VisionManager
 from jarvis.backend.core.voice_manager import VoiceManager, VoiceState
 from jarvis.backend.utils.reflection import ReflectionEngine
 from jarvis.backend.utils.audit_logging import AuditLogger
@@ -106,11 +111,13 @@ def _settings_response(
 async def startup_health(
     core: JarvisCore = Depends(get_core),
     voice_manager: VoiceManager = Depends(get_voice_manager),
+    vision_manager: VisionManager = Depends(get_vision_manager),
     recovery_manager: RecoveryManager = Depends(get_recovery_manager),
     scheduler: BackupScheduler = Depends(get_backup_scheduler),
 ) -> StartupHealthResponse:
     provider = await core.lm_provider.status()
     voice = voice_manager.status()
+    vision = vision_manager.status()
     recovery = recovery_manager.check_integrity()
     services = {
         "backend": {"ok": True, "detail": "API online"},
@@ -126,6 +133,10 @@ async def startup_health(
                 "tts_adapter": voice.tts_adapter,
                 "tts_configured": voice.tts_configured,
             },
+        },
+        "vision": {
+            "ok": vision.configured,
+            "detail": {"adapter": vision.adapter, "configured": vision.configured},
         },
         "memory": {"ok": recovery.sqlite_ok, "detail": core.memory.vector_store.health()},
         "backups": {
@@ -144,12 +155,14 @@ async def system_overview(
     username: str = "local-user",
     core: JarvisCore = Depends(get_core),
     voice_manager: VoiceManager = Depends(get_voice_manager),
+    vision_manager: VisionManager = Depends(get_vision_manager),
     monitor: SystemMonitor = Depends(get_system_monitor),
     permission_manager: PermissionManager = Depends(get_permission_manager),
     scheduler: BackupScheduler = Depends(get_backup_scheduler),
 ) -> SystemOverviewResponse:
     provider = await core.lm_provider.status()
     voice = voice_manager.status()
+    vision = vision_manager.status()
     user = core.memory.get_or_create_user(username)
     tasks = core.memory.list_tasks(user.user_id)
     documents = core.memory.list_documents(user.user_id)
@@ -173,6 +186,12 @@ async def system_overview(
             "label": voice.state.value,
             "stt_adapter": voice.stt_adapter,
             "tts_adapter": voice.tts_adapter,
+        },
+        "vision_interface": {
+            "ok": vision.configured,
+            "label": vision.adapter if vision.configured else "offline",
+            "adapter": vision.adapter,
+            "configured": vision.configured,
         },
         "security_mesh": {
             "ok": True,
@@ -736,6 +755,44 @@ def voice_audio(
     if audio_path.parent != Path(output_dir).resolve() or not audio_path.is_file():
         raise HTTPException(status_code=404, detail=f"Voice audio not found: {filename}")
     return FileResponse(audio_path)
+
+
+@router.get("/vision/status", response_model=VisionStatusResponse)
+def vision_status(
+    vision_manager: VisionManager = Depends(get_vision_manager),
+) -> VisionStatusResponse:
+    status = vision_manager.status()
+    return VisionStatusResponse(
+        state=status.state.value,
+        adapter=status.adapter,
+        configured=status.configured,
+    )
+
+
+@router.post("/vision/analyze", response_model=VisionAnalyzeResponse)
+def analyze_vision(
+    request: VisionAnalyzeRequest,
+    vision_manager: VisionManager = Depends(get_vision_manager),
+) -> VisionAnalyzeResponse:
+    try:
+        if request.image_base64:
+            try:
+                image = base64.b64decode(request.image_base64, validate=True)
+            except (binascii.Error, ValueError) as exc:
+                raise HTTPException(status_code=400, detail="Invalid base64 image data") from exc
+            if len(image) > 20_000_000:
+                raise HTTPException(status_code=413, detail="Image upload exceeds 20 MB")
+            description = vision_manager.analyze_image(image, request.image_suffix, request.prompt)
+        elif request.image_path:
+            description = vision_manager.analyze(request.image_path, request.prompt)
+        else:
+            raise HTTPException(status_code=400, detail="image_base64 or image_path is required")
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return VisionAnalyzeResponse(
+        description=description,
+        state=vision_manager.status().state.value,
+    )
 
 
 @router.get("/recovery/integrity", response_model=IntegrityResponse)

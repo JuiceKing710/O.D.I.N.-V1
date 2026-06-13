@@ -22,6 +22,7 @@ from jarvis.backend.core.app_factory import (
     get_recovery_manager,
     get_settings_store,
     get_system_monitor,
+    get_vision_manager,
     get_voice_manager,
     get_wake_word_listener,
 )
@@ -35,6 +36,7 @@ from jarvis.backend.core.memory_manager import MemoryManager
 from jarvis.backend.core.recovery_manager import RecoveryManager
 from jarvis.backend.core.settings_store import SettingsStore
 from jarvis.backend.core.vector_store import NullVectorStore
+from jarvis.backend.core.vision_manager import VisionManager
 from jarvis.backend.core.voice_manager import VoiceManager, WhisperCliSpeechToTextAdapter
 from jarvis.backend.utils.audit_logging import AuditLogger
 from jarvis.backend.utils.permissions import Permission, PermissionDecision, PermissionManager
@@ -78,6 +80,14 @@ class FakeSpeechToTextAdapter:
         return audio_path.read_bytes().decode("utf-8")
 
 
+class FakeVisionAdapter:
+    name = "fake-vision"
+    configured = True
+
+    def analyze(self, image_path: Path, prompt: str) -> str:
+        return f"saw {image_path.read_bytes().decode('utf-8')}"
+
+
 class ApiTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
@@ -115,6 +125,7 @@ class ApiTests(unittest.TestCase):
         )
         self.backup_scheduler = BackupScheduler(self.recovery, self.event_bus)
         self.voice = VoiceManager(event_bus=self.event_bus)
+        self.vision = VisionManager(event_bus=self.event_bus)
 
         class StubWakeListener:
             def __init__(self) -> None:
@@ -137,6 +148,7 @@ class ApiTests(unittest.TestCase):
         app.dependency_overrides[get_wake_word_listener] = lambda: self.wake_listener
         app.dependency_overrides[get_system_monitor] = lambda: SystemMonitor()
         app.dependency_overrides[get_voice_manager] = lambda: self.voice
+        app.dependency_overrides[get_vision_manager] = lambda: self.vision
         self.client = TestClient(app)
 
     def tearDown(self) -> None:
@@ -563,6 +575,48 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(body["state"], "idle")
         self.assertFalse(body["stt_configured"])
         self.assertFalse(body["tts_configured"])
+
+    def test_vision_status_reports_unconfigured_adapter(self) -> None:
+        response = self.client.get("/api/v1/vision/status")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["state"], "idle")
+        self.assertFalse(body["configured"])
+        self.assertEqual(body["adapter"], "unconfigured")
+
+    def test_vision_analyze_reports_unconfigured_adapter(self) -> None:
+        response = self.client.post(
+            "/api/v1/vision/analyze",
+            json={"image_base64": base64.b64encode(b"frame").decode("ascii")},
+        )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("Vision adapter is not configured", response.json()["detail"])
+
+    def test_vision_analyzes_uploaded_image(self) -> None:
+        self.vision.adapter = FakeVisionAdapter()
+
+        response = self.client.post(
+            "/api/v1/vision/analyze",
+            json={
+                "image_base64": base64.b64encode(b"a smiling face").decode("ascii"),
+                "image_suffix": ".jpg",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["description"], "saw a smiling face")
+
+    def test_vision_analyze_rejects_invalid_base64(self) -> None:
+        self.vision.adapter = FakeVisionAdapter()
+
+        response = self.client.post(
+            "/api/v1/vision/analyze",
+            json={"image_base64": "not valid base64!!!"},
+        )
+
+        self.assertEqual(response.status_code, 400)
 
     def test_voice_synthesize_reports_unconfigured_adapter(self) -> None:
         response = self.client.post(

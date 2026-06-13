@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { useOdinCamera } from "../hooks/useOdinCamera.js";
 import { useSpeechSynthesis } from "../hooks/useSpeechSynthesis.js";
 import {
   createReflection,
@@ -72,6 +73,7 @@ export function ChatView({ onOpenCoreFocus }) {
       setVoiceState("idle");
     },
   });
+  const camera = useOdinCamera({ onError: setVoiceNotice });
   const provider = providerStatus.provider;
   const providerAvailable = Boolean(provider?.available);
   const providerState = providerStatus.loading ? "pending" : providerAvailable ? "ok" : "error";
@@ -474,6 +476,20 @@ export function ChatView({ onOpenCoreFocus }) {
     }
   }
 
+  async function lookWithCamera() {
+    if (!camera.previewActive) {
+      await camera.startPreview();
+      return;
+    }
+    setVoiceNotice("");
+    const seen = await camera.captureAndAnalyze(
+      "Briefly describe what the camera sees in one or two sentences.",
+    );
+    if (seen) {
+      await sendMessage(`(Through the camera you can see: ${seen}) Respond naturally to what you see.`);
+    }
+  }
+
   function formatConversationTime(value) {
     return new Intl.DateTimeFormat(undefined, {
       dateStyle: "short",
@@ -603,6 +619,38 @@ export function ChatView({ onOpenCoreFocus }) {
             <span style={{ width: `${microphoneLevel}%` }} />
           </span>
           <button
+            className={camera.previewActive ? "toggle active" : "toggle"}
+            type="button"
+            onClick={camera.togglePreview}
+            title={
+              camera.available
+                ? "Toggle the camera preview"
+                : "Vision model offline — pull an Ollama vision model to enable replies"
+            }
+          >
+            {camera.previewActive ? "Camera On" : "Camera"}
+          </button>
+          <button
+            type="button"
+            onClick={lookWithCamera}
+            disabled={!camera.previewActive || camera.analyzing}
+          >
+            {camera.analyzing ? "Looking…" : "Look"}
+          </button>
+          {camera.previewActive && camera.cameraDevices.length > 1 && (
+            <select
+              aria-label="Camera"
+              value={camera.selectedCamera}
+              onChange={(event) => camera.setSelectedCamera(event.target.value)}
+            >
+              {camera.cameraDevices.map((device, index) => (
+                <option key={device.deviceId} value={device.deviceId}>
+                  {device.label || `Camera ${index + 1}`}
+                </option>
+              ))}
+            </select>
+          )}
+          <button
             type="button"
             onClick={() => {
               setVoiceEnabled(true);
@@ -623,6 +671,12 @@ export function ChatView({ onOpenCoreFocus }) {
         </div>
       </header>
       {voiceNotice && <p className="voice-notice">{voiceNotice}</p>}
+      {camera.previewActive && (
+        <div className="camera-preview" aria-label="Camera preview">
+          <video ref={camera.videoRef} muted playsInline />
+          {camera.description && <p className="camera-caption">{camera.description}</p>}
+        </div>
+      )}
       {!providerStatus.loading && !providerAvailable && (
         <p className="error provider-notice">{providerMessage}</p>
       )}

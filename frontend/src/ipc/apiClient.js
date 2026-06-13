@@ -79,6 +79,21 @@ export function synthesizeVoice({ text, voiceName = null }) {
   });
 }
 
+export function fetchVisionStatus() {
+  return request("/api/v1/vision/status");
+}
+
+export function analyzeVisionImage({ imageBase64, imageSuffix = ".jpg", prompt = null }) {
+  return request("/api/v1/vision/analyze", {
+    method: "POST",
+    body: JSON.stringify({
+      image_base64: imageBase64,
+      image_suffix: imageSuffix,
+      prompt,
+    }),
+  });
+}
+
 export function updateSettings(patch) {
   return request("/api/v1/settings", {
     method: "PUT",

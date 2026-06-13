@@ -240,6 +240,24 @@ class VoiceSynthesizeResponse(BaseModel):
     state: Literal["idle", "listening", "thinking", "speaking"]
 
 
+class VisionStatusResponse(BaseModel):
+    state: Literal["idle", "analyzing"]
+    adapter: str
+    configured: bool
+
+
+class VisionAnalyzeRequest(BaseModel):
+    image_path: str | None = None
+    image_base64: str | None = Field(default=None, max_length=30_000_000)
+    image_suffix: str = ".jpg"
+    prompt: str | None = None
+
+
+class VisionAnalyzeResponse(BaseModel):
+    description: str
+    state: Literal["idle", "analyzing"]
+
+
 class IntegrityResponse(BaseModel):
     ok: bool
     sqlite_ok: bool

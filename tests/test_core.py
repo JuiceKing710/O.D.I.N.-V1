@@ -517,6 +517,33 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(transcript, "hello from audio")
         self.assertEqual(voice.state, VoiceState.IDLE)
 
+    def test_vision_analyzes_uploaded_image(self) -> None:
+        from jarvis.backend.core.vision_manager import VisionManager, VisionState
+
+        class FakeVisionAdapter:
+            name = "fake-vision"
+            configured = True
+
+            def analyze(self, image_path, prompt):
+                return f"{prompt[:4]}::{image_path.read_bytes().decode('utf-8')}"
+
+        vision = VisionManager(adapter=FakeVisionAdapter())
+
+        description = vision.analyze_image(b"a face", ".jpg", prompt="Describe it")
+
+        self.assertEqual(description, "Desc::a face")
+        self.assertEqual(vision.state, VisionState.IDLE)
+
+    def test_vision_unconfigured_adapter_raises_and_resets_state(self) -> None:
+        from jarvis.backend.core.vision_manager import VisionManager, VisionState
+
+        vision = VisionManager()
+
+        with self.assertRaises(RuntimeError):
+            vision.analyze_image(b"frame", ".jpg")
+        self.assertEqual(vision.state, VisionState.IDLE)
+        self.assertFalse(vision.status().configured)
+
     def test_whisper_cli_converts_audio_and_returns_transcript(self) -> None:
         audio = Path(self.tmp.name) / "input.webm"
         model = Path(self.tmp.name) / "model.bin"
