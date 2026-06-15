@@ -273,12 +273,15 @@ class VoiceManager:
         stt_adapter: SpeechToTextAdapter | None = None,
         tts_adapter: TextToSpeechAdapter | None = None,
         event_bus: EventBus | None = None,
+        fallback_tts_adapter: TextToSpeechAdapter | None = None,
     ) -> None:
         self.state = VoiceState.IDLE
         self.interruption_config = interruption_config or InterruptionConfig()
         self.stt_adapter = stt_adapter or UnconfiguredSpeechToTextAdapter()
         self.tts_adapter = tts_adapter or UnconfiguredTextToSpeechAdapter()
         self.event_bus = event_bus
+        self._fallback_tts = fallback_tts_adapter
+        self.last_tts_fallback: str | None = None
         self._speech_frames = 0
         self._silence_frames = 0
 
@@ -320,11 +323,49 @@ class VoiceManager:
     def synthesize(self, text: str, voice_name: str | None = None) -> Path:
         self.transition(VoiceState.SPEAKING)
         try:
-            output = self.tts_adapter.synthesize(text, voice_name)
+            output = self._synthesize_with_fallback(text, voice_name)
             self._prune_voice_outputs(output)
             return output
         finally:
             self.transition(VoiceState.IDLE)
+
+    def _synthesize_with_fallback(self, text: str, voice_name: str | None) -> Path:
+        """Try the configured adapter; if it fails for any reason (e.g. a broken
+        Piper binary), degrade to native macOS say rather than crashing."""
+        self.last_tts_fallback = None
+        try:
+            return self.tts_adapter.synthesize(text, voice_name)
+        except Exception as primary_error:  # noqa: BLE001 - any failure should degrade, not 500
+            # Only rescue an adapter that claimed to be ready but failed at
+            # runtime (e.g. broken Piper). The Unconfigured placeholder is a
+            # deliberate "nothing set up" state and must keep surfacing as such.
+            if not getattr(self.tts_adapter, "configured", False):
+                raise
+            fallback = self._ensure_fallback_tts()
+            if fallback is None:
+                raise
+            self.last_tts_fallback = (
+                f"{self.tts_adapter.name} failed ({primary_error}); used {fallback.name}"
+            )
+            if self.event_bus is not None:
+                self.event_bus.publish(
+                    "voice.tts_fallback",
+                    {"primary": self.tts_adapter.name, "fallback": fallback.name},
+                    transient=True,
+                )
+            return fallback.synthesize(text, voice_name)
+
+    def _ensure_fallback_tts(self) -> TextToSpeechAdapter | None:
+        if self._fallback_tts is not None:
+            return self._fallback_tts
+        # Native say is the universal fallback on macOS; never fall back say->say.
+        if isinstance(self.tts_adapter, MacOSTextToSpeechAdapter) or not MacOSTextToSpeechAdapter.available():
+            return None
+        output_dir = getattr(self.tts_adapter, "output_dir", None) or (
+            Path(tempfile.gettempdir()) / "jarvis-voice"
+        )
+        self._fallback_tts = MacOSTextToSpeechAdapter(output_dir)
+        return self._fallback_tts
 
     def _prune_voice_outputs(self, current: Path, keep: int = 20) -> None:
         output_dir = getattr(self.tts_adapter, "output_dir", None)

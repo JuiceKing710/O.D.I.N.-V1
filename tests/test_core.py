@@ -290,6 +290,92 @@ class CoreTests(unittest.TestCase):
         self.assertTrue(response.ok)
         self.assertEqual(response.payload["results"][0]["url"], "https://example.com")
 
+    def test_research_bot_fetch_returns_stripped_page_text(self) -> None:
+        self.permissions.update_decisions({"access_network": "allowed"})
+        bot = ResearchBot(self.permissions, self.audit)
+        page = "<html><body><h1>Title</h1><p>Hello world</p><script>bad()</script></body></html>"
+
+        with patch("urllib.request.urlopen", return_value=MockHttpResponse(page)):
+            response = asyncio.run(
+                bot.on_request(
+                    BotRequest(
+                        sender="test",
+                        action="fetch",
+                        payload={"url": "https://example.com/page"},
+                        correlation_id="1",
+                    )
+                )
+            )
+
+        self.assertTrue(response.ok)
+        self.assertIn("Hello world", response.payload["text"])
+        self.assertNotIn("bad()", response.payload["text"])
+        self.assertEqual(response.payload["url"], "https://example.com/page")
+
+    def test_research_bot_fetch_rejects_non_http_urls(self) -> None:
+        self.permissions.update_decisions({"access_network": "allowed"})
+        bot = ResearchBot(self.permissions, self.audit)
+
+        response = asyncio.run(
+            bot.on_request(
+                BotRequest(
+                    sender="test",
+                    action="fetch",
+                    payload={"url": "file:///etc/passwd"},
+                    correlation_id="1",
+                )
+            )
+        )
+
+        self.assertFalse(response.ok)
+        self.assertIn("http", response.error)
+
+    def test_research_bot_fetch_requires_network_permission(self) -> None:
+        bot = ResearchBot(self.permissions, self.audit)  # access_network defaults to prompt
+
+        response = asyncio.run(
+            bot.on_request(
+                BotRequest(
+                    sender="test",
+                    action="fetch",
+                    payload={"url": "https://example.com"},
+                    correlation_id="1",
+                )
+            )
+        )
+
+        self.assertFalse(response.ok)
+        self.assertIn("permission_request", response.payload)
+
+    def test_tts_falls_back_to_say_when_primary_adapter_fails(self) -> None:
+        class FailingTts:
+            name = "broken-piper"
+            configured = True
+
+            def synthesize(self, text, voice_name=None):
+                raise RuntimeError("piper binary missing")
+
+        class RecordingTts:
+            name = "macos-say"
+            configured = True
+
+            def __init__(self) -> None:
+                self.calls: list[str] = []
+
+            def synthesize(self, text, voice_name=None):
+                self.calls.append(text)
+                return Path("/tmp/fallback.wav")
+
+        fallback = RecordingTts()
+        voice = VoiceManager(tts_adapter=FailingTts(), fallback_tts_adapter=fallback)
+
+        output = voice.synthesize("hello there")
+
+        self.assertEqual(output, Path("/tmp/fallback.wav"))
+        self.assertEqual(fallback.calls, ["hello there"])
+        self.assertIsNotNone(voice.last_tts_fallback)
+        self.assertEqual(voice.state, VoiceState.IDLE)
+
     def test_bot_manager_returns_none_for_unknown_bot(self) -> None:
         response = asyncio.run(
             self.bot_manager.dispatch(
