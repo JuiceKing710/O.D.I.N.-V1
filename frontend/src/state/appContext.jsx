@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { fetchSettings, updateSettings } from "../ipc/apiClient.js";
+import { fetchSettings, setAuthToken, updateSettings } from "../ipc/apiClient.js";
 
 const DEFAULT_USER = {
   displayName: "Local User",
@@ -14,6 +14,7 @@ export function AppStateProvider({ children }) {
   const [settings, setSettings] = useState(null);
   const [settingsError, setSettingsError] = useState("");
   const [settingsLoading, setSettingsLoading] = useState(true);
+  const [authRequired, setAuthRequired] = useState(false);
   const startNewConversation = useCallback(() => {
     setConversationId(null);
   }, []);
@@ -24,14 +25,28 @@ export function AppStateProvider({ children }) {
     try {
       const nextSettings = await fetchSettings();
       setSettings(nextSettings);
+      setAuthRequired(false);
       return nextSettings;
     } catch (error) {
+      // A 401 means the backend wants the remote access token (phone over
+      // Tailscale); surface a token prompt instead of a generic error.
+      if (error.status === 401) {
+        setAuthRequired(true);
+      }
       setSettingsError(error.message);
       throw error;
     } finally {
       setSettingsLoading(false);
     }
   }, []);
+
+  const submitToken = useCallback(
+    async (token) => {
+      setAuthToken(token.trim());
+      return refreshSettings();
+    },
+    [refreshSettings],
+  );
 
   const saveSettings = useCallback(async (patch) => {
     setSettingsLoading(true);
@@ -60,6 +75,7 @@ export function AppStateProvider({ children }) {
 
   const value = useMemo(
     () => ({
+      authRequired,
       conversationId,
       currentUser,
       refreshSettings,
@@ -70,8 +86,10 @@ export function AppStateProvider({ children }) {
       settingsError,
       settingsLoading,
       startNewConversation,
+      submitToken,
     }),
     [
+      authRequired,
       conversationId,
       currentUser,
       refreshSettings,
@@ -80,6 +98,7 @@ export function AppStateProvider({ children }) {
       settingsError,
       settingsLoading,
       startNewConversation,
+      submitToken,
     ],
   );
 

@@ -9,6 +9,7 @@ import { OdinStage } from "./components/OdinStage.jsx";
 import { ProjectDashboard } from "./components/ProjectDashboard.jsx";
 import { SettingsPanel } from "./components/SettingsPanel.jsx";
 import { StartupHealth } from "./components/StartupHealth.jsx";
+import { TokenGate } from "./components/TokenGate.jsx";
 import { TopStrip } from "./components/TopStrip.jsx";
 import { connectEvents, fetchSystemOverview } from "./ipc/apiClient.js";
 import { AppStateProvider, useAppState } from "./state/appContext.jsx";
@@ -27,7 +28,7 @@ const PANELS = [
 function App() {
   const [activePanel, setActivePanel] = useState("overview");
   const [coreFocus, setCoreFocus] = useState(false);
-  const { conversationId } = useAppState();
+  const { authRequired, conversationId } = useAppState();
   const messages = useChatStore((state) => state.messages);
   const tasks = useChatStore((state) => state.tasks);
   const voiceState = useChatStore((state) => state.voiceState);
@@ -67,6 +68,10 @@ function App() {
       window.clearInterval(timer);
     };
   }, [setOverview]);
+
+  if (authRequired) {
+    return <TokenGate />;
+  }
 
   if (coreFocus) {
     return (

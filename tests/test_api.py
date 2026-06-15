@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import os
 import sqlite3
 import tempfile
 import unittest
@@ -8,7 +9,14 @@ from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
+from fastapi import FastAPI, WebSocket
 from fastapi.testclient import TestClient
+
+from jarvis.backend.utils.auth import (
+    TokenAuthMiddleware,
+    auth_required,
+    resolve_api_token,
+)
 
 from jarvis.backend.api.main import create_app
 from jarvis.backend.bots.code_bot import CodeBot
@@ -813,6 +821,94 @@ class ApiTests(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 404)
+
+
+def _auth_app(token: str | None) -> FastAPI:
+    app = FastAPI()
+
+    @app.get("/healthz")
+    def healthz() -> dict[str, bool]:
+        return {"ok": True}
+
+    @app.get("/api/v1/ping")
+    def ping() -> dict[str, bool]:
+        return {"pong": True}
+
+    @app.websocket("/api/v1/ws")
+    async def ws(websocket: WebSocket) -> None:
+        await websocket.accept()
+        await websocket.send_json({"ok": True})
+        await websocket.close()
+
+    app.add_middleware(TokenAuthMiddleware, token=token)
+    return app
+
+
+class AuthMiddlewareTests(unittest.TestCase):
+    def test_disabled_passes_through(self) -> None:
+        client = TestClient(_auth_app(None))
+        self.assertEqual(client.get("/api/v1/ping").status_code, 200)
+
+    def test_enabled_blocks_without_token(self) -> None:
+        client = TestClient(_auth_app("s3cret"))
+        self.assertEqual(client.get("/api/v1/ping").status_code, 401)
+
+    def test_enabled_allows_bearer_and_header(self) -> None:
+        client = TestClient(_auth_app("s3cret"))
+        self.assertEqual(
+            client.get("/api/v1/ping", headers={"Authorization": "Bearer s3cret"}).status_code,
+            200,
+        )
+        self.assertEqual(
+            client.get("/api/v1/ping", headers={"X-Odin-Token": "s3cret"}).status_code,
+            200,
+        )
+        self.assertEqual(
+            client.get("/api/v1/ping", headers={"Authorization": "Bearer wrong"}).status_code,
+            401,
+        )
+
+    def test_healthz_and_options_exempt(self) -> None:
+        client = TestClient(_auth_app("s3cret"))
+        self.assertEqual(client.get("/healthz").status_code, 200)
+        # OPTIONS preflight must not be blocked by auth (CORS handles it).
+        self.assertNotEqual(client.options("/api/v1/ping").status_code, 401)
+
+    def test_websocket_requires_token_query_param(self) -> None:
+        client = TestClient(_auth_app("s3cret"))
+        with client.websocket_connect("/api/v1/ws?token=s3cret") as websocket:
+            self.assertEqual(websocket.receive_json(), {"ok": True})
+        with self.assertRaises(Exception):
+            with client.websocket_connect("/api/v1/ws"):
+                pass
+
+    def test_resolve_token_off_by_default(self) -> None:
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("JARVIS_REQUIRE_AUTH", None)
+            self.assertFalse(auth_required())
+            self.assertIsNone(resolve_api_token())
+
+    def test_resolve_token_uses_env_when_enabled(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"JARVIS_REQUIRE_AUTH": "1", "JARVIS_API_TOKEN": "from-env"},
+            clear=False,
+        ):
+            self.assertTrue(auth_required())
+            self.assertEqual(resolve_api_token(), "from-env")
+
+    def test_resolve_token_generates_key_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            key_path = Path(tmp) / "api.key"
+            with patch.dict(
+                os.environ,
+                {"JARVIS_REQUIRE_AUTH": "yes", "JARVIS_API_TOKEN_PATH": str(key_path)},
+                clear=False,
+            ):
+                os.environ.pop("JARVIS_API_TOKEN", None)
+                token = resolve_api_token()
+            self.assertTrue(token)
+            self.assertEqual(key_path.read_text(encoding="utf-8").strip(), token)
 
 
 if __name__ == "__main__":

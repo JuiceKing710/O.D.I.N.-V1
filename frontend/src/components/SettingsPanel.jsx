@@ -5,6 +5,7 @@ import {
   fetchBackupSchedule,
   fetchMemoryStatus,
   fetchModels,
+  getAuthToken,
   fetchPermissionRequests,
   fetchRecoveryBackups,
   fetchVoiceStatus,
@@ -513,6 +514,49 @@ ollama pull llama3.2`}</pre>
               />
               Verify each reply before sending
             </label>
+          </section>
+
+          <section className="settings-section" aria-label="Remote access">
+            <div className="section-heading">
+              <h2>Remote Access</h2>
+              <span className={getAuthToken() ? "status-ok" : "status-muted"}>
+                {getAuthToken() ? "Token set" : "Local only"}
+              </span>
+            </div>
+            <p className="section-hint">
+              To reach Odin from your phone away from home, run Tailscale on this Mac
+              and your phone, start the backend with remote auth on, then open the
+              Tailscale HTTPS address in your phone browser. Enter the token below when
+              prompted. Keep this token private — it grants full access to Odin.
+            </p>
+            {getAuthToken() ? (
+              <div className="inline-form">
+                <input
+                  type="password"
+                  readOnly
+                  aria-label="Remote access token"
+                  value={getAuthToken()}
+                />
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(getAuthToken());
+                      setSaveNotice("Access token copied to clipboard.");
+                    } catch {
+                      setError("Could not copy token — select and copy it manually.");
+                    }
+                  }}
+                >
+                  Copy
+                </button>
+              </div>
+            ) : (
+              <p className="setting-note">
+                Remote auth is off. Start the backend with JARVIS_REQUIRE_AUTH=1 (and
+                optionally JARVIS_API_TOKEN) to enable it; the token is then shown here.
+              </p>
+            )}
           </section>
 
           <section className="settings-section" aria-label="Interface settings">

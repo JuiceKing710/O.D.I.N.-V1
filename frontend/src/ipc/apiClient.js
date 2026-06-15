@@ -1,16 +1,66 @@
-const API_BASE_URL =
-  globalThis.jarvisDesktop?.apiBaseUrl ||
-  import.meta.env.VITE_API_BASE_URL ||
-  "http://127.0.0.1:8000";
+// Dev runs the UI on Vite (5173/4173) with the backend on a separate port, so
+// fall back to 127.0.0.1:8000 there. When the backend serves the built UI
+// itself (e.g. over Tailscale on the phone) the API is same-origin.
+const DEV_PORTS = new Set(["5173", "4173"]);
+
+function defaultApiBaseUrl() {
+  if (globalThis.jarvisDesktop?.apiBaseUrl) {
+    return globalThis.jarvisDesktop.apiBaseUrl;
+  }
+  if (import.meta.env.VITE_API_BASE_URL) {
+    return import.meta.env.VITE_API_BASE_URL;
+  }
+  const origin = globalThis.location?.origin;
+  if (origin?.startsWith("http") && !DEV_PORTS.has(globalThis.location.port)) {
+    return origin;
+  }
+  return "http://127.0.0.1:8000";
+}
+
+const API_BASE_URL = defaultApiBaseUrl();
+const TOKEN_STORAGE_KEY = "odin_token";
 
 export function resolveApiUrl(path) {
   return new URL(path, API_BASE_URL).toString();
+}
+
+export function getAuthToken() {
+  if (globalThis.jarvisDesktop?.apiToken) {
+    return globalThis.jarvisDesktop.apiToken;
+  }
+  try {
+    return globalThis.localStorage?.getItem(TOKEN_STORAGE_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+export function setAuthToken(token) {
+  try {
+    globalThis.localStorage?.setItem(TOKEN_STORAGE_KEY, token);
+  } catch {
+    // localStorage may be unavailable (private mode); the token is then per-call only.
+  }
+}
+
+export function clearAuthToken() {
+  try {
+    globalThis.localStorage?.removeItem(TOKEN_STORAGE_KEY);
+  } catch {
+    // Nothing to clear if storage is unavailable.
+  }
+}
+
+function authHeaders() {
+  const token = getAuthToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
 async function request(path, options = {}) {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     headers: {
       "Content-Type": "application/json",
+      ...authHeaders(),
       ...(options.headers || {}),
     },
     ...options,
@@ -23,7 +73,9 @@ async function request(path, options = {}) {
     } catch {
       // Keep the status-only message when the server does not return JSON.
     }
-    throw new Error(detail);
+    const error = new Error(detail);
+    error.status = response.status;
+    throw error;
   }
   return response.json();
 }
@@ -262,6 +314,11 @@ export function connectEvents(onEvent) {
   const url = new URL(API_BASE_URL);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   url.pathname = "/api/v1/events";
+  // Browsers can't set headers on a WebSocket, so the token rides in the query.
+  const token = getAuthToken();
+  if (token) {
+    url.searchParams.set("token", token);
+  }
   let socket = null;
   let closed = false;
   let retryDelay = 1000;

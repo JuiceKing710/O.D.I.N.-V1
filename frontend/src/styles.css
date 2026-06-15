@@ -709,6 +709,35 @@ textarea {
   padding: 4px 10px;
 }
 
+.token-gate {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 24px;
+}
+
+.token-gate-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  max-width: 360px;
+  padding: 24px;
+  border: 1px solid #2a3340;
+  border-radius: 12px;
+  background: #171c24;
+}
+
+.token-gate-card h1 {
+  margin: 0;
+}
+
+.token-gate-hint {
+  color: #8ea0b6;
+  font-size: 0.85rem;
+}
+
 .message.user {
   margin-left: auto;
   background: #18252b;

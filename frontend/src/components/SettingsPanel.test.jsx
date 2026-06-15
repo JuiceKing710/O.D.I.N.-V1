@@ -15,11 +15,13 @@ vi.mock("../ipc/apiClient.js", () => ({
   fetchRecoveryBackups: vi.fn(),
   fetchSettings: vi.fn(),
   fetchVoiceStatus: vi.fn(),
+  getAuthToken: vi.fn(() => ""),
   loadModel: vi.fn(),
   resolveApiUrl: vi.fn((path) => path),
   resolvePermissionRequest: vi.fn(),
   restoreRecoveryBackup: vi.fn(),
   synthesizeVoice: vi.fn(),
+  setAuthToken: vi.fn(),
   setupVoiceModel: vi.fn(),
   updateSettings: vi.fn(),
 }));
