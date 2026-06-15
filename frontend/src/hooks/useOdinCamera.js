@@ -79,16 +79,10 @@ export function useOdinCamera({ onError } = {}) {
           : VIDEO_CONSTRAINTS,
       });
       streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        try {
-          await videoRef.current.play?.();
-        } catch {
-          // Autoplay can reject (or be unimplemented in tests); the stream is
-          // still attached, so the preview and captures keep working.
-        }
-      }
       await refreshCameras();
+      // The <video> element only mounts once previewActive flips true, so the
+      // stream is attached in the effect below (after the element exists) —
+      // attaching here would no-op against a null ref and show a blank preview.
       setPreviewActive(true);
     } catch (error) {
       onError?.(
@@ -150,6 +144,20 @@ export function useOdinCamera({ onError } = {}) {
     },
     [onError],
   );
+
+  // Attach the live stream once the <video> has actually mounted (it only
+  // renders while previewActive is true). Running here — not inside
+  // startPreview — guarantees videoRef points at a real element.
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!previewActive || !video || !streamRef.current) {
+      return;
+    }
+    if (video.srcObject !== streamRef.current) {
+      video.srcObject = streamRef.current;
+    }
+    video.play?.().catch(() => {});
+  }, [previewActive]);
 
   useEffect(() => stopPreview, [stopPreview]);
 

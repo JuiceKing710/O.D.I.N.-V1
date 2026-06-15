@@ -100,20 +100,35 @@ describe("ChatView microphone", () => {
     await waitFor(() => expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalled());
     expect(screen.getByRole("button", { name: "Send Voice" })).toBeInTheDocument();
   });
+
+  it("opens the mic automatically when hands-free conversation is enabled", async () => {
+    render(<ChatView onOpenCoreFocus={vi.fn()} />);
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Converse" })).not.toBeDisabled(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Converse" }));
+
+    expect(screen.getByRole("button", { name: "Conversation On" })).toBeInTheDocument();
+    await waitFor(() => expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalled(), {
+      timeout: 2000,
+    });
+  });
 });
 
 describe("ChatView camera", () => {
+  let fakeStream;
+
   beforeEach(() => {
     appSettings = { voice_mode: "push_to_talk" };
     analyzeVisionImage.mockClear();
+    fakeStream = { getTracks: () => [{ stop: vi.fn() }] };
     globalThis.jarvisDesktop = { requestCamera: vi.fn().mockResolvedValue(true) };
     Object.defineProperty(navigator, "mediaDevices", {
       configurable: true,
       value: {
         enumerateDevices: vi.fn().mockResolvedValue([]),
-        getUserMedia: vi.fn().mockResolvedValue({
-          getTracks: () => [{ stop: vi.fn() }],
-        }),
+        getUserMedia: vi.fn().mockResolvedValue(fakeStream),
       },
     });
     HTMLMediaElement.prototype.play = vi.fn().mockResolvedValue(undefined);
@@ -126,7 +141,7 @@ describe("ChatView camera", () => {
     delete globalThis.jarvisDesktop;
   });
 
-  it("requests the camera and shows a live preview", async () => {
+  it("requests the camera and attaches the stream to the mounted preview", async () => {
     render(<ChatView onOpenCoreFocus={vi.fn()} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Camera" }));
@@ -136,7 +151,11 @@ describe("ChatView camera", () => {
       expect.objectContaining({ video: expect.anything() }),
     );
     expect(screen.getByRole("button", { name: "Camera On" })).toBeInTheDocument();
-    expect(screen.getByLabelText("Camera preview")).toBeInTheDocument();
+    const preview = screen.getByLabelText("Camera preview");
+    const video = preview.querySelector("video");
+    expect(video).toBeTruthy();
+    await waitFor(() => expect(video.srcObject).toBe(fakeStream));
+    expect(HTMLMediaElement.prototype.play).toHaveBeenCalled();
   });
 
   it("captures a frame and routes the vision result into the conversation", async () => {
