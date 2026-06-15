@@ -9,7 +9,24 @@
     "desktop": "npm run build && electron .",
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1",
-    "test": "vitest run"
+    "test": "vitest run",
+    "dist": "npm run build && electron-builder --mac"
+  },
+  "build": {
+    "appId": "com.odin.core",
+    "productName": "O.D.I.N. Core System",
+    "files": ["dist/**/*", "electron/**/*"],
+    "directories": { "buildResources": "build" },
+    "mac": {
+      "category": "public.app-category.productivity",
+      "hardenedRuntime": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "extendInfo": {
+        "NSCameraUsageDescription": "O.D.I.N. uses the camera only when you explicitly enable vision, so it can see and describe what is in front of you.",
+        "NSMicrophoneUsageDescription": "O.D.I.N. uses the microphone only when you start voice input or enable the wake word, so it can hear and transcribe your speech."
+      }
+    }
   },
   "dependencies": {
     "@vitejs/plugin-react": "^6.0.2",
@@ -22,6 +39,7 @@
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "electron": "^39.2.7",
+    "electron-builder": "^25.1.8",
     "jsdom": "^29.1.1",
     "vitest": "^4.1.8"
   }
