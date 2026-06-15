@@ -27,6 +27,7 @@ export function ChatView({ onOpenCoreFocus }) {
   const [conversationsLoading, setConversationsLoading] = useState(false);
   const [isPinnedToLatest, setIsPinnedToLatest] = useState(true);
   const [voiceEnabled, setVoiceEnabled] = useState(true);
+  const [handsFree, setHandsFree] = useState(false);
   const [speakingMessageId, setSpeakingMessageId] = useState("");
   const [showJumpLatest, setShowJumpLatest] = useState(false);
   const [voiceNotice, setVoiceNotice] = useState("");
@@ -41,15 +42,14 @@ export function ChatView({ onOpenCoreFocus }) {
   const [backendSpeaking, setBackendSpeaking] = useState(false);
   const [backendVoiceAvailable, setBackendVoiceAvailable] = useState(false);
   const [microphoneDevices, setMicrophoneDevices] = useState([]);
-  const [microphoneLevel, setMicrophoneLevel] = useState(0);
   const [selectedMicrophone, setSelectedMicrophone] = useState("");
   const audioRef = useRef(null);
-  const audioContextRef = useRef(null);
   const playbackContextRef = useRef(null);
   const automaticListeningRef = useRef(false);
   const automaticRecordingRef = useRef(false);
+  const handsFreeRef = useRef(false);
+  const backendRecordingRef = useRef(false);
   const automaticStopTimerRef = useRef(null);
-  const microphoneFrameRef = useRef(null);
   const inputRef = useRef(null);
   const mediaRecorderRef = useRef(null);
   const mediaStreamRef = useRef(null);
@@ -161,13 +161,39 @@ export function ChatView({ onOpenCoreFocus }) {
   }, [voiceMode]);
 
   useEffect(() => {
+    handsFreeRef.current = handsFree;
+  }, [handsFree]);
+
+  useEffect(() => {
+    backendRecordingRef.current = backendRecording;
+  }, [backendRecording]);
+
+  // Hands-free conversation loop: whenever Odin is idle (done thinking and
+  // speaking) and we're not already recording, reopen the mic after a short
+  // gap so the user can just keep talking. Waiting for the "idle" state means
+  // the mic never reopens while Odin is still speaking, so it won't hear itself.
+  useEffect(() => {
+    if (!handsFree || voiceDisabled) {
+      return undefined;
+    }
+    if (voiceState !== "idle" || backendRecording) {
+      return undefined;
+    }
+    const timer = window.setTimeout(() => {
+      if (handsFreeRef.current && !backendRecordingRef.current) {
+        void toggleMicrophone(true);
+      }
+    }, 700);
+    return () => window.clearTimeout(timer);
+  }, [handsFree, voiceState, backendRecording, voiceDisabled]);
+
+  useEffect(() => {
     return () => {
       automaticListeningRef.current = false;
+      handsFreeRef.current = false;
       clearTimeout(automaticStopTimerRef.current);
       mediaRecorderRef.current?.stop();
       mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
-      cancelAnimationFrame(microphoneFrameRef.current);
-      audioContextRef.current?.close();
       playbackContextRef.current?.close();
       detachOdinAnalyser();
     };
@@ -361,34 +387,6 @@ export function ChatView({ onOpenCoreFocus }) {
     return btoa(binary);
   }
 
-  function stopMicrophoneLevel() {
-    cancelAnimationFrame(microphoneFrameRef.current);
-    microphoneFrameRef.current = null;
-    audioContextRef.current?.close();
-    audioContextRef.current = null;
-    setMicrophoneLevel(0);
-  }
-
-  function monitorMicrophoneLevel(stream) {
-    const AudioContext = window.AudioContext || window.webkitAudioContext;
-    if (!AudioContext) {
-      return;
-    }
-    const context = new AudioContext();
-    const analyser = context.createAnalyser();
-    const source = context.createMediaStreamSource(stream);
-    const samples = new Uint8Array(analyser.frequencyBinCount);
-    source.connect(analyser);
-    audioContextRef.current = context;
-    const update = () => {
-      analyser.getByteFrequencyData(samples);
-      const average = samples.reduce((total, sample) => total + sample, 0) / samples.length;
-      setMicrophoneLevel(Math.min(Math.round((average / 128) * 100), 100));
-      microphoneFrameRef.current = requestAnimationFrame(update);
-    };
-    update();
-  }
-
   async function refreshMicrophones() {
     if (!navigator.mediaDevices?.enumerateDevices) {
       return;
@@ -433,7 +431,6 @@ export function ChatView({ onOpenCoreFocus }) {
         automaticRecordingRef.current = false;
         setBackendRecording(false);
         stream.getTracks().forEach((track) => track.stop());
-        stopMicrophoneLevel();
         setVoiceState("thinking");
         try {
           const blob = new Blob(chunks, { type: recorder.mimeType });
@@ -462,17 +459,34 @@ export function ChatView({ onOpenCoreFocus }) {
       if (automatic) {
         automaticStopTimerRef.current = window.setTimeout(() => recorder.stop(), 8000);
       }
-      monitorMicrophoneLevel(stream);
       await refreshMicrophones();
       setBackendRecording(true);
       setVoiceState("listening");
       setVoiceNotice("");
     } catch (error) {
+      if (handsFreeRef.current) {
+        setHandsFree(false);
+      }
       setVoiceNotice(
         error?.name === "NotAllowedError"
           ? "Microphone access was denied. Allow microphone access in system settings, then try again."
           : `Microphone could not start: ${error.message}`,
       );
+    }
+  }
+
+  function toggleHandsFree() {
+    const next = !handsFree;
+    setHandsFree(next);
+    if (next) {
+      speech.warmUp();
+      setVoiceEnabled(true);
+      setVoiceNotice("Hands-free conversation on — just start talking.");
+    } else {
+      automaticRecordingRef.current = false;
+      clearTimeout(automaticStopTimerRef.current);
+      mediaRecorderRef.current?.stop();
+      setVoiceNotice("");
     }
   }
 
@@ -590,10 +604,19 @@ export function ChatView({ onOpenCoreFocus }) {
             Stop
           </button>
           <button
+            className={handsFree ? "toggle active" : "toggle"}
+            type="button"
+            onClick={toggleHandsFree}
+            disabled={voiceDisabled || (!backendVoiceAvailable && !speech.available)}
+            title="Hands-free voice conversation: talk, Odin replies aloud, mic reopens automatically"
+          >
+            {handsFree ? "Conversation On" : "Converse"}
+          </button>
+          <button
             className={backendRecording ? "toggle active" : "toggle"}
             type="button"
             onClick={() => toggleMicrophone(false)}
-            disabled={voiceDisabled}
+            disabled={voiceDisabled || handsFree}
           >
             {backendRecording ? "Send Voice" : "Mic"}
           </button>
@@ -611,13 +634,6 @@ export function ChatView({ onOpenCoreFocus }) {
               ))}
             </select>
           )}
-          <span
-            className="microphone-level"
-            aria-label={`Microphone level ${microphoneLevel}%`}
-            title={`Microphone level ${microphoneLevel}%`}
-          >
-            <span style={{ width: `${microphoneLevel}%` }} />
-          </span>
           <button
             className={camera.previewActive ? "toggle active" : "toggle"}
             type="button"
@@ -673,7 +689,7 @@ export function ChatView({ onOpenCoreFocus }) {
       {voiceNotice && <p className="voice-notice">{voiceNotice}</p>}
       {camera.previewActive && (
         <div className="camera-preview" aria-label="Camera preview">
-          <video ref={camera.videoRef} muted playsInline />
+          <video ref={camera.videoRef} autoPlay muted playsInline />
           {camera.description && <p className="camera-caption">{camera.description}</p>}
         </div>
       )}

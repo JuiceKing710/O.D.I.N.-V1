@@ -163,14 +163,12 @@ textarea {
   height: 94%;
   border: 1px solid rgba(255, 154, 31, 0.82);
   box-shadow: 0 0 28px rgba(255, 122, 24, 0.22);
-  animation: rotate 9s linear infinite;
 }
 
 .core-ring.inner {
   width: 68%;
   height: 68%;
   border: 2px dashed rgba(255, 207, 107, 0.9);
-  animation: rotate 6s linear infinite reverse;
 }
 
 .core-orb {
@@ -188,7 +186,6 @@ textarea {
 .core-spokes {
   width: 100%;
   height: 100%;
-  animation: rotate 18s linear infinite reverse;
 }
 
 .core-spokes span {
@@ -215,7 +212,6 @@ textarea {
 .core-particles {
   width: 100%;
   height: 100%;
-  animation: rotate 14s linear infinite;
 }
 
 .core-particles span {
@@ -248,14 +244,6 @@ textarea {
   transform: rotate(var(--particle-angle)) translateX(56px);
 }
 
-.ai-core.thinking .core-ring.inner {
-  animation-duration: 2s;
-}
-
-.ai-core.thinking .core-particles {
-  animation-duration: 5s;
-}
-
 .ai-core.thinking .core-particles span {
   background: #ff9a1f;
   box-shadow: 0 0 16px rgba(255, 122, 24, 0.84);
@@ -264,7 +252,6 @@ textarea {
 
 .ai-core.speaking .core-orb {
   transform: scale(1.08);
-  animation: pulse 850ms ease-in-out infinite alternate;
 }
 
 .ai-core.speaking .core-particles span {
@@ -478,22 +465,6 @@ textarea {
   color: #11151c;
   background: #62d6d2;
   border-color: #62d6d2;
-}
-
-.microphone-level {
-  width: 72px;
-  height: 8px;
-  overflow: hidden;
-  background: #10141a;
-  border: 1px solid #2a3340;
-  border-radius: 999px;
-}
-
-.microphone-level span {
-  display: block;
-  height: 100%;
-  background: linear-gradient(90deg, #62d6d2, #f1c453);
-  transition: width 80ms linear;
 }
 
 .voice-pill {
@@ -1193,22 +1164,6 @@ textarea {
   opacity: 0.55;
 }
 
-@keyframes rotate {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-@keyframes pulse {
-  from {
-    box-shadow: 0 0 30px rgba(98, 214, 210, 0.45);
-  }
-
-  to {
-    box-shadow: 0 0 54px rgba(98, 214, 210, 0.8);
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
   .core-ring,
   .core-orb,
@@ -1437,14 +1392,12 @@ textarea:focus-visible {
   height: 90%;
   border: 1px solid rgba(141, 159, 255, 0.42);
   box-shadow: 0 0 34px rgba(103, 124, 255, 0.12);
-  animation-duration: 18s;
 }
 
 .core-ring.inner {
   width: 73%;
   height: 73%;
   border: 1px solid rgba(113, 229, 218, 0.36);
-  animation-duration: 12s;
 }
 
 .core-orb {
@@ -1829,16 +1782,6 @@ textarea:focus-visible {
 
 .ghost-message span {
   color: var(--accent-bright);
-}
-
-@keyframes pulse {
-  from {
-    box-shadow: 0 0 28px rgba(108, 129, 255, 0.4);
-  }
-
-  to {
-    box-shadow: 0 0 58px rgba(113, 229, 218, 0.64);
-  }
 }
 
 @media (max-width: 760px) {
@@ -2853,13 +2796,7 @@ textarea:focus-visible {
   vertical-align: text-bottom;
   background: var(--odin-cyan);
   border-radius: 2px;
-  animation: stream-blink 800ms ease-in-out infinite;
   box-shadow: 0 0 8px var(--odin-glow-cyan);
-}
-
-@keyframes stream-blink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.2; }
 }
 
 .message.streaming p,

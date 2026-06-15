@@ -1,10 +1,6 @@
 import React, { useEffect, useRef } from "react";
 import { createVegvisir } from "./vegvisir.js";
-import { useChatStore } from "../state/chatStore.js";
 import { branchIntensity, buildStaveIntensities, useSystemStore } from "../state/systemStore.js";
-import { sampleOdinEnergy } from "../state/odinPresence.js";
-
-const FRAME_INTERVAL_MS = 33; // ~30fps cap for the whole stage
 
 const SOFTWARE_NODES = [
   { id: "reasoning_engine", title: "Reasoning Engine", x: 0.5, y: 0.04 },
@@ -85,14 +81,8 @@ export function OdinStage() {
   const containerRef = useRef(null);
   const canvasRef = useRef(null);
   const particlesRef = useRef([]);
-  const voiceState = useChatStore((state) => state.voiceState);
-  const voiceStateRef = useRef(voiceState);
   const metrics = useSystemStore((state) => state.metrics);
   const nodes = useSystemStore((state) => state.nodes);
-
-  useEffect(() => {
-    voiceStateRef.current = voiceState;
-  }, [voiceState]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -115,9 +105,6 @@ export function OdinStage() {
     }
 
     const vegvisir = createVegvisir();
-    let frame = 0;
-    let smoothedEnergy = 0;
-    let lastDraw = 0;
     let softwarePaths = [];
     let hardwarePaths = [];
 
@@ -166,25 +153,20 @@ export function OdinStage() {
       ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
       buildPaths(container.clientWidth, container.clientHeight);
       vegvisir.invalidate();
+      render(performance.now());
     }
 
+    // The system map is drawn once as a static frame (and again only on resize)
+    // — no animation loop, so the renderer idles and leaves the CPU/GPU free for
+    // Odin's actual work. `now`, voice, and energy are frozen at a calm idle.
     function render(now) {
-      if (now - lastDraw < FRAME_INTERVAL_MS) {
-        frame = window.requestAnimationFrame(render);
-        return;
-      }
-      lastDraw = now;
       const width = container.clientWidth;
       const height = container.clientHeight;
       const centerX = width / 2;
       const centerY = height * 0.46;
-      const voice = voiceStateRef.current;
-      const mode = voice === "speaking" ? "speaking" : voice === "listening" ? "listening" : "idle";
-      const speech = sampleOdinEnergy(now, mode === "speaking");
-      const breathing = 0.1 + 0.06 * Math.sin(now / 1400);
-      const target = mode === "speaking" ? 0.25 + speech * 0.75 : mode === "listening" ? 0.4 + 0.12 * Math.sin(now / 260) : breathing;
-      smoothedEnergy += (target - smoothedEnergy) * 0.18;
-      const energy = smoothedEnergy;
+      const voice = "idle";
+      const mode = "idle";
+      const energy = 0.12; // calm resting glow
 
       ctx.clearRect(0, 0, width, height);
 
@@ -254,25 +236,12 @@ export function OdinStage() {
         mode,
         staves: buildStaveIntensities(nodeActivity, voice, nowMs),
       });
-
-      frame = window.requestAnimationFrame(render);
-    }
-
-    function handleVisibility() {
-      window.cancelAnimationFrame(frame);
-      if (!document.hidden) {
-        frame = window.requestAnimationFrame(render);
-      }
     }
 
     resize();
-    frame = window.requestAnimationFrame(render);
     window.addEventListener("resize", resize);
-    document.addEventListener("visibilitychange", handleVisibility);
     return () => {
-      window.cancelAnimationFrame(frame);
       window.removeEventListener("resize", resize);
-      document.removeEventListener("visibilitychange", handleVisibility);
     };
   }, []);
 
