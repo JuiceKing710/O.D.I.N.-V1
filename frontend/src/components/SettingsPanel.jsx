@@ -477,6 +477,44 @@ ollama pull llama3.2`}</pre>
             </form>
           </section>
 
+          <section className="settings-section" aria-label="Truthfulness">
+            <div className="section-heading">
+              <h2>Truthfulness</h2>
+              <span className={settings?.truthfulness_check ? "status-ok" : "status-muted"}>
+                {settings?.truthfulness_check ? "Verifying" : "Standard"}
+              </span>
+            </div>
+            <p className="section-hint">
+              Odin always runs under a truthfulness contract that tells him to never
+              invent facts and to say "I don't know" rather than guess. Turn this on to
+              also fact-check every reply against the conversation before sending it.
+              It is more careful but slower, and it turns off live word-by-word
+              streaming because the answer is finalized after the check.
+            </p>
+            <label className="toggle-row">
+              <input
+                type="checkbox"
+                checked={Boolean(settings?.truthfulness_check)}
+                disabled={settingsLoading}
+                onChange={async (event) => {
+                  setError("");
+                  setSaveNotice("");
+                  try {
+                    await saveSettings({ truthfulness_check: event.target.checked });
+                    setSaveNotice(
+                      event.target.checked
+                        ? "Reply verification on — Odin fact-checks each answer before sending."
+                        : "Reply verification off — standard streaming responses.",
+                    );
+                  } catch (err) {
+                    setError(err.message);
+                  }
+                }}
+              />
+              Verify each reply before sending
+            </label>
+          </section>
+
           <section className="settings-section" aria-label="Interface settings">
             <div className="section-heading">
               <h2>Interface</h2>

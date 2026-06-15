@@ -26,6 +26,9 @@ from jarvis.backend.api.models import (
     DeleteResponse,
     DocumentResponse,
     EventResponse,
+    ImageGenerateRequest,
+    ImageGenerateResponse,
+    ImageStatusResponse,
     IntegrityResponse,
     MemoryBlocksResponse,
     MemoryBlockUpdateRequest,
@@ -65,6 +68,7 @@ from jarvis.backend.core.app_factory import (
     get_audit_logger,
     get_core,
     get_event_bus,
+    get_image_manager,
     get_permission_manager,
     get_recovery_manager,
     get_memory_consolidator,
@@ -79,6 +83,7 @@ from jarvis.backend.core.wake_word import WakeWordListener
 from jarvis.backend.core.backup_scheduler import BackupScheduler
 from jarvis.backend.core.bot_manager import BotMessage
 from jarvis.backend.core.event_bus import EventBus
+from jarvis.backend.core.image_manager import ImageManager
 from jarvis.backend.core.jarvis_core import JarvisCore
 from jarvis.backend.core.recovery_manager import RecoveryManager
 from jarvis.backend.core.settings_store import SettingsStore
@@ -793,6 +798,66 @@ def analyze_vision(
         description=description,
         state=vision_manager.status().state.value,
     )
+
+
+@router.get("/image/status", response_model=ImageStatusResponse)
+def image_status(
+    image_manager: ImageManager = Depends(get_image_manager),
+) -> ImageStatusResponse:
+    status = image_manager.status()
+    return ImageStatusResponse(
+        state=status.state.value,
+        adapter=status.adapter,
+        configured=status.configured,
+        network=status.network,
+    )
+
+
+@router.post("/image/generate", response_model=ImageGenerateResponse)
+async def generate_image(
+    request: ImageGenerateRequest,
+    core: JarvisCore = Depends(get_core),
+    image_manager: ImageManager = Depends(get_image_manager),
+) -> ImageGenerateResponse:
+    # Route through the bot so generation is permission-gated, throttled, and
+    # audited the same way a chat-triggered "/image ..." request would be.
+    response = await core.bot_manager.dispatch(
+        BotMessage(
+            sender=request.sender,
+            recipient="image",
+            action="generate",
+            payload={"text": request.prompt},
+        )
+    )
+    if response is None:
+        raise HTTPException(status_code=404, detail="Image bot not found")
+    if not response.ok:
+        pending = (response.payload or {}).get("permission_request")
+        if isinstance(pending, dict):
+            raise HTTPException(
+                status_code=403,
+                detail=response.error or "Image generation requires approval",
+            )
+        raise HTTPException(
+            status_code=503, detail=response.error or "Image generation failed"
+        )
+    return ImageGenerateResponse(
+        image_url=response.payload["image_url"],
+        prompt=response.payload.get("prompt", request.prompt),
+        state=image_manager.status().state.value,
+    )
+
+
+@router.get("/image/file/{filename}")
+def image_file(
+    filename: str,
+    image_manager: ImageManager = Depends(get_image_manager),
+) -> FileResponse:
+    output_dir = Path(image_manager.output_dir).resolve()
+    image_path = (output_dir / filename).resolve()
+    if image_path.parent != output_dir or not image_path.is_file():
+        raise HTTPException(status_code=404, detail=f"Image not found: {filename}")
+    return FileResponse(image_path)
 
 
 @router.get("/recovery/integrity", response_model=IntegrityResponse)

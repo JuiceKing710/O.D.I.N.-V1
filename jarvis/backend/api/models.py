@@ -18,6 +18,7 @@ class ChatResponse(BaseModel):
     reply: str
     bot: str | None = None
     created_at: datetime
+    image_url: str | None = None
 
 
 class MemoryQueryRequest(BaseModel):
@@ -139,6 +140,7 @@ class SettingsResponse(BaseModel):
     turbo_mode: bool = False
     gemini_api_key_set: bool = False
     wake_word: bool = False
+    truthfulness_check: bool = False
 
 
 class SettingsUpdateRequest(BaseModel):
@@ -149,6 +151,7 @@ class SettingsUpdateRequest(BaseModel):
     turbo_mode: bool | None = None
     gemini_api_key: str | None = None
     wake_word: bool | None = None
+    truthfulness_check: bool | None = None
 
 
 class PermissionRequestResponse(BaseModel):
@@ -256,6 +259,24 @@ class VisionAnalyzeRequest(BaseModel):
 class VisionAnalyzeResponse(BaseModel):
     description: str
     state: Literal["idle", "analyzing"]
+
+
+class ImageStatusResponse(BaseModel):
+    state: Literal["idle", "generating"]
+    adapter: str
+    configured: bool
+    network: bool
+
+
+class ImageGenerateRequest(BaseModel):
+    prompt: str = Field(min_length=1)
+    sender: str = Field(default="user", min_length=1)
+
+
+class ImageGenerateResponse(BaseModel):
+    image_url: str
+    prompt: str
+    state: Literal["idle", "generating"]
 
 
 class IntegrityResponse(BaseModel):

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime, timezone
 import re
 from typing import Any
@@ -19,12 +20,14 @@ class JarvisCore:
         lm_provider: LMProviderInterface,
         audit_logger: AuditLogger,
         event_bus: EventBus | None = None,
+        read_settings: Callable[[], dict[str, Any]] | None = None,
     ) -> None:
         self.memory = memory
         self.bot_manager = bot_manager
         self.lm_provider = lm_provider
         self.audit_logger = audit_logger
         self.event_bus = event_bus
+        self.read_settings = read_settings
 
     async def handle_message(
         self,
@@ -46,17 +49,24 @@ class JarvisCore:
         user_message = self.memory.add_message(convo.convo_id, "user", normalized)
         self._publish_chat_message(user_message.role, user_message.content, convo.convo_id)
 
-        bot_name, bot_reply = await self._maybe_dispatch_bot(normalized)
+        bot_name, bot_reply, bot_image_url = await self._maybe_dispatch_bot(normalized)
+        image_url = None
         if bot_reply is not None:
             reply = bot_reply
+            image_url = bot_image_url
         else:
             context = self.memory.memory_block_context() + self.memory.query_context(
                 user.user_id, normalized, limit=5
             )
             history = self._conversation_history(convo.convo_id)
-            reply = await self._generate_streaming(
-                normalized, context, history, convo.convo_id, metadata or {}
-            )
+            if self._truthfulness_check_enabled():
+                reply = await self._generate_verified(
+                    normalized, context, history, convo.convo_id, metadata or {}
+                )
+            else:
+                reply = await self._generate_streaming(
+                    normalized, context, history, convo.convo_id, metadata or {}
+                )
 
         assistant_message = self.memory.add_message(convo.convo_id, "assistant", reply)
         self._publish_chat_message(assistant_message.role, assistant_message.content, convo.convo_id)
@@ -71,6 +81,7 @@ class JarvisCore:
             "reply": reply,
             "bot": bot_name,
             "created_at": datetime.now(timezone.utc),
+            "image_url": image_url,
         }
 
     HISTORY_TURN_LIMIT = 20
@@ -112,6 +123,84 @@ class JarvisCore:
                 )
         return "".join(parts)
 
+    def _truthfulness_check_enabled(self) -> bool:
+        if self.read_settings is None:
+            return False
+        try:
+            return bool(self.read_settings().get("truthfulness_check"))
+        except Exception:  # noqa: BLE001 - a settings read must never break chat
+            return False
+
+    # Verification prompts kept terse so the extra calls stay cheap on a local model.
+    _VERIFY_INSTRUCTION = (
+        "You are a strict fact-checker. Below are the user's message, the context "
+        "the assistant was given, and the assistant's draft reply. List any "
+        "statements in the draft that are NOT supported by the context or the "
+        "conversation and that the assistant could not actually know — including "
+        "invented facts, names, numbers, citations, or URLs. If every statement "
+        'is supported or appropriately hedged, reply with exactly "OK".'
+    )
+    _CORRECT_INSTRUCTION = (
+        "A fact-checker flagged possible unsupported or fabricated statements in "
+        "your draft reply. Rewrite your reply to the user so it asserts only what "
+        "is supported by the conversation, the provided context, or knowledge you "
+        "are confident in. Remove or explicitly hedge anything you cannot verify, "
+        "and never invent details. Reply with the corrected answer only."
+    )
+
+    async def _generate_verified(
+        self,
+        text: str,
+        context: list[str],
+        history: list[dict[str, str]],
+        convo_id: int,
+        metadata: dict[str, Any],
+    ) -> str:
+        """Generate, fact-check against context, and correct once if needed.
+
+        Used only when the `truthfulness_check` setting is on. Live token
+        streaming is intentionally skipped here because the final text isn't
+        known until after verification; the reply is still delivered through the
+        normal chat.message path.
+        """
+        draft = await self.lm_provider.generate(
+            text, context=context, metadata=metadata, history=history
+        )
+        verdict = await self.lm_provider.generate(
+            f"{self._VERIFY_INSTRUCTION}\n\n"
+            f"USER MESSAGE:\n{text}\n\n"
+            f"CONTEXT:\n{self._format_context(context)}\n\n"
+            f"DRAFT REPLY:\n{draft}",
+            context=[],
+            metadata=metadata,
+        )
+        if verdict.strip().upper().startswith("OK"):
+            self._publish_verification(convo_id, "passed")
+            return draft
+        corrected = await self.lm_provider.generate(
+            f"{self._CORRECT_INSTRUCTION}\n\n"
+            f"USER MESSAGE:\n{text}\n\n"
+            f"FACT-CHECK NOTES:\n{verdict.strip()}\n\n"
+            f"YOUR DRAFT REPLY:\n{draft}",
+            context=context,
+            metadata=metadata,
+            history=history,
+        )
+        self._publish_verification(convo_id, "corrected")
+        return corrected
+
+    @staticmethod
+    def _format_context(context: list[str]) -> str:
+        return "\n".join(f"- {item}" for item in context) if context else "(none)"
+
+    def _publish_verification(self, convo_id: int, outcome: str) -> None:
+        if self.event_bus is not None:
+            self.event_bus.publish(
+                "chat.verification",
+                {"conversation_id": convo_id, "outcome": outcome},
+                transient=True,
+            )
+
     def _publish_chat_message(self, role: str, content: str, conversation_id: int) -> None:
         if self.event_bus is None:
             return
@@ -124,27 +213,31 @@ class JarvisCore:
             },
         )
 
-    async def _maybe_dispatch_bot(self, message: str) -> tuple[str | None, str | None]:
+    async def _maybe_dispatch_bot(
+        self, message: str
+    ) -> tuple[str | None, str | None, str | None]:
         parsed = self._parse_bot_request(message)
         if parsed is None:
-            return None, None
+            return None, None, None
         bot_name, action, payload = parsed
         bot = self.bot_manager.get(bot_name)
         if bot is None or action not in bot.capabilities():
-            return bot_name, f"Unsupported planned action: {bot_name}.{action}"
+            return bot_name, f"Unsupported planned action: {bot_name}.{action}", None
         response = await self.bot_manager.dispatch(
             BotMessage(sender="user", recipient=bot_name, action=action, payload=payload)
         )
         if response is None:
-            return bot_name, f"Unknown bot: {bot_name}"
+            return bot_name, f"Unknown bot: {bot_name}", None
         if not response.ok:
             pending = response.payload.get("permission_request")
             if isinstance(pending, dict):
                 reason = pending.get("reason") or f"{bot_name}.{action}"
-                return bot_name, f"Approval required before Jarvis can continue: {reason}"
-            return bot_name, response.error or "Bot request failed."
+                return bot_name, f"Approval required before Jarvis can continue: {reason}", None
+            return bot_name, response.error or "Bot request failed.", None
         text = response.payload.get("text")
-        return bot_name, str(text) if text is not None else "Bot request completed."
+        image_url = response.payload.get("image_url")
+        reply = str(text) if text is not None else "Bot request completed."
+        return bot_name, reply, image_url
 
     @staticmethod
     def _parse_bot_request(message: str) -> tuple[str, str, dict[str, Any]] | None:
@@ -159,6 +252,11 @@ class JarvisCore:
             (r"^(?:analyze code|analyze file)\s+(.+)$", "code", "analyze"),
             (r"^(?:read file|open file)\s+(.+)$", "file", "read"),
             (r"^(?:run command|execute command)\s+(.+)$", "system", "execute"),
+            (
+                r"^(?:generate|draw|create|make|paint)\s+(?:an?\s+)?(?:image|picture|drawing|painting)\s+(?:of\s+|showing\s+|with\s+)?(.+)$",
+                "image",
+                "generate",
+            ),
         )
         for pattern, bot, action in patterns:
             match = re.match(pattern, message.strip(), flags=re.IGNORECASE | re.DOTALL)

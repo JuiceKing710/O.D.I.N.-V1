@@ -116,6 +116,46 @@ describe("ChatView microphone", () => {
   });
 });
 
+describe("ChatView generated images", () => {
+  beforeEach(() => {
+    appSettings = { voice_mode: "push_to_talk" };
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: { enumerateDevices: vi.fn().mockResolvedValue([]) },
+    });
+  });
+
+  afterEach(() => {
+    cleanup();
+    chatState.messages = [];
+  });
+
+  it("renders an image when an assistant message carries an image_url", async () => {
+    chatState.messages = [
+      {
+        id: "img-1",
+        role: "assistant",
+        content: "Here's an AI-generated image of: a red bicycle",
+        imageUrl: "/api/v1/image/file/abc123.png",
+      },
+    ];
+
+    render(<ChatView onOpenCoreFocus={vi.fn()} />);
+
+    const image = await screen.findByRole("img", { name: /AI-generated image of: a red bicycle/i });
+    expect(image).toHaveAttribute("src", "/api/v1/image/file/abc123.png");
+    expect(screen.getByRole("button", { name: "Save image" })).toBeInTheDocument();
+  });
+
+  it("renders no image for a plain text message", () => {
+    chatState.messages = [{ id: "txt-1", role: "assistant", content: "just text" }];
+
+    render(<ChatView onOpenCoreFocus={vi.fn()} />);
+
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+  });
+});
+
 describe("ChatView camera", () => {
   let fakeStream;
 

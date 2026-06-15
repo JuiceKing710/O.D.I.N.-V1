@@ -19,6 +19,11 @@
       "name": "access_network",
       "description": "Access external network resources.",
       "default": "prompt"
+    },
+    {
+      "name": "generate_images",
+      "description": "Generate images from text prompts.",
+      "default": "prompt"
     }
   ]
 }

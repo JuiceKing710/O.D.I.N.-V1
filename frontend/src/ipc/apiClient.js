@@ -94,6 +94,17 @@ export function analyzeVisionImage({ imageBase64, imageSuffix = ".jpg", prompt =
   });
 }
 
+export function fetchImageStatus() {
+  return request("/api/v1/image/status");
+}
+
+export function generateImage({ prompt, sender = "local-user" }) {
+  return request("/api/v1/image/generate", {
+    method: "POST",
+    body: JSON.stringify({ prompt, sender }),
+  });
+}
+
 export function updateSettings(patch) {
   return request("/api/v1/settings", {
     method: "PUT",

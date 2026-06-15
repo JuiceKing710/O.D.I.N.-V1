@@ -24,8 +24,10 @@ from jarvis.backend.core.backup_scheduler import BackupScheduler
 from jarvis.backend.core.bot_manager import BotManager, BotMessage
 from jarvis.backend.core.jarvis_core import JarvisCore
 from jarvis.backend.core.lm_provider import (
+    SYSTEM_PROMPT,
     EchoLMProvider,
     GeminiProvider,
+    LMStudioProvider,
     OllamaProvider,
     TurboSwitchProvider,
 )
@@ -142,6 +144,9 @@ class CoreTests(unittest.TestCase):
                 "write_files": Permission("write_files", "write files", PermissionDecision.PROMPT),
                 "execute_scripts": Permission(
                     "execute_scripts", "execute scripts", PermissionDecision.DENIED
+                ),
+                "generate_images": Permission(
+                    "generate_images", "generate images", PermissionDecision.PROMPT
                 ),
             }
         )
@@ -1168,6 +1173,200 @@ class CoreTests(unittest.TestCase):
         self.assertTrue(scheduler.needs_catch_up(after_four))
         asyncio.run(scheduler.run_backup())
         self.assertFalse(scheduler.needs_catch_up(after_four))
+
+
+    def test_image_bot_generates_and_returns_url(self) -> None:
+        from jarvis.backend.bots.image_bot import ImageBot
+        from jarvis.backend.core.image_manager import ImageManager, StubImageAdapter
+
+        self.permissions.update_decisions({"generate_images": "allowed"})
+        manager = ImageManager(
+            adapter=StubImageAdapter(), output_dir=Path(self.tmp.name) / "images"
+        )
+        bot = ImageBot(self.permissions, self.audit, manager)
+
+        response = asyncio.run(
+            bot.on_request(
+                BotRequest(
+                    sender="user",
+                    action="generate",
+                    payload={"text": "a red bicycle"},
+                    correlation_id="1",
+                )
+            )
+        )
+
+        self.assertTrue(response.ok)
+        self.assertIn("AI-generated", response.payload["text"])
+        self.assertTrue(response.payload["image_url"].startswith("/api/v1/image/file/"))
+        saved = list((Path(self.tmp.name) / "images").glob("*.png"))
+        self.assertEqual(len(saved), 1)
+
+    def test_image_bot_requires_permission(self) -> None:
+        from jarvis.backend.bots.image_bot import ImageBot
+        from jarvis.backend.core.image_manager import ImageManager, StubImageAdapter
+
+        manager = ImageManager(
+            adapter=StubImageAdapter(), output_dir=Path(self.tmp.name) / "images"
+        )
+        bot = ImageBot(self.permissions, self.audit, manager)  # generate_images=prompt
+
+        response = asyncio.run(
+            bot.on_request(
+                BotRequest(
+                    sender="user",
+                    action="generate",
+                    payload={"text": "a sunset"},
+                    correlation_id="1",
+                )
+            )
+        )
+
+        self.assertFalse(response.ok)
+        self.assertIn("permission_request", response.payload)
+
+    def test_image_manager_prunes_to_max_files(self) -> None:
+        from jarvis.backend.core.image_manager import ImageManager, StubImageAdapter
+
+        manager = ImageManager(
+            adapter=StubImageAdapter(),
+            output_dir=Path(self.tmp.name) / "images",
+            max_files=3,
+        )
+        for _ in range(5):
+            manager.generate("a cat")
+
+        saved = list((Path(self.tmp.name) / "images").glob("*.png"))
+        self.assertEqual(len(saved), 3)
+
+    def test_image_natural_language_dispatches_image_bot(self) -> None:
+        from jarvis.backend.bots.image_bot import ImageBot
+        from jarvis.backend.core.image_manager import ImageManager, StubImageAdapter
+
+        self.permissions.update_decisions({"generate_images": "allowed"})
+        manager = ImageManager(
+            adapter=StubImageAdapter(), output_dir=Path(self.tmp.name) / "images"
+        )
+        self.bot_manager.register(ImageBot(self.permissions, self.audit, manager))
+
+        result = asyncio.run(
+            self.core.handle_message("draw a picture of a fox in the snow", "zeb")
+        )
+
+        self.assertEqual(result["bot"], "image")
+        self.assertTrue(result["image_url"].startswith("/api/v1/image/file/"))
+
+    def test_verification_pass_corrects_flagged_reply(self) -> None:
+        # Provider whose first answer fabricates, whose fact-check flags it, and
+        # whose correction is grounded. Proves the generate->verify->correct loop.
+        class FactCheckingProvider(EchoLMProvider):
+            def __init__(self) -> None:
+                super().__init__()
+                self.calls: list[str] = []
+
+            async def generate(self, text, context, metadata=None, history=None):
+                self.calls.append(text)
+                if text.startswith("You are a strict fact-checker"):
+                    return "The population figure is invented and unsupported."
+                if text.startswith("A fact-checker flagged"):
+                    return "I don't actually know that figure, so I won't guess."
+                return "The city has exactly 3,141,592 residents."
+
+        provider = FactCheckingProvider()
+        core = self._build_core(provider)
+        with patch.object(core, "read_settings", lambda: {"truthfulness_check": True}):
+            result = asyncio.run(core.handle_message("how many people live there?", "zeb"))
+
+        self.assertEqual(result["reply"], "I don't actually know that figure, so I won't guess.")
+        # draft + verify + correct = 3 model calls
+        self.assertEqual(len(provider.calls), 3)
+
+    def test_verification_pass_keeps_reply_when_factcheck_passes(self) -> None:
+        class PassingProvider(EchoLMProvider):
+            def __init__(self) -> None:
+                super().__init__()
+                self.calls = 0
+
+            async def generate(self, text, context, metadata=None, history=None):
+                self.calls += 1
+                if text.startswith("You are a strict fact-checker"):
+                    return "OK"
+                return "I don't have that information."
+
+        provider = PassingProvider()
+        core = self._build_core(provider)
+        with patch.object(core, "read_settings", lambda: {"truthfulness_check": True}):
+            result = asyncio.run(core.handle_message("what is her middle name?", "zeb"))
+
+        self.assertEqual(result["reply"], "I don't have that information.")
+        self.assertEqual(provider.calls, 2)  # draft + verify, no correction
+
+    def test_verification_disabled_uses_streaming_path(self) -> None:
+        captured = {}
+
+        class StreamProvider(EchoLMProvider):
+            async def generate(self, text, context, metadata=None, history=None):
+                captured["generate_called"] = True
+                return "should not be used"
+
+            async def generate_stream(self, text, context, metadata=None, history=None):
+                captured["streamed"] = True
+                yield "streamed reply"
+
+        core = self._build_core(StreamProvider())  # no read_settings -> check off
+        result = asyncio.run(core.handle_message("hello", "zeb"))
+
+        self.assertEqual(result["reply"], "streamed reply")
+        self.assertTrue(captured.get("streamed"))
+        self.assertNotIn("generate_called", captured)
+
+    def test_system_prompt_enforces_truthfulness(self) -> None:
+        self.assertIn("TOP PRIORITY", SYSTEM_PROMPT)
+        self.assertIn("I don't know", SYSTEM_PROMPT)
+        self.assertIn("Never invent", SYSTEM_PROMPT)
+        # The honesty contract must keep the identity line existing tests rely on.
+        self.assertIn("Your name is Odin", SYSTEM_PROMPT)
+        # Explicit guards for the two real failure modes: false perception
+        # ("I saw you on camera") and false capability ("I upgraded myself").
+        self.assertIn("Never claim to see", SYSTEM_PROMPT)
+        self.assertIn("upgraded", SYSTEM_PROMPT)
+
+    def test_every_provider_payload_carries_truthfulness_contract(self) -> None:
+        # The contract must reach the model on every real provider, not just the
+        # constant — this is the regression guard that a provider can't silently
+        # drop it (LM Studio used to ignore SYSTEM_PROMPT entirely).
+        marker = "Never invent"
+
+        ollama_messages = OllamaProvider._build_messages("hi", [])
+        self.assertEqual(ollama_messages[0]["role"], "system")
+        self.assertIn(marker, ollama_messages[0]["content"])
+
+        gemini_payload = GeminiProvider._build_payload("hi", [])
+        self.assertIn(marker, gemini_payload["system_instruction"]["parts"][0]["text"])
+
+        lmstudio_messages = LMStudioProvider._build_messages("hi", [])
+        self.assertEqual(lmstudio_messages[0]["role"], "system")
+        self.assertIn(marker, lmstudio_messages[0]["content"])
+
+    def test_lmstudio_generate_sends_system_prompt(self) -> None:
+        provider = LMStudioProvider(base_url="http://127.0.0.1:1234", model="local-model")
+        captured = {}
+
+        def fake_urlopen(request, timeout=None):
+            captured["payload"] = json.loads(request.data.decode("utf-8"))
+            return MockHttpResponse(
+                {"choices": [{"message": {"content": "Understood."}}]}
+            )
+
+        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            reply = asyncio.run(provider.generate("hello", ["user likes brevity"]))
+
+        self.assertEqual(reply, "Understood.")
+        messages = captured["payload"]["messages"]
+        self.assertEqual(messages[0]["role"], "system")
+        self.assertIn("Never invent", messages[0]["content"])
+        self.assertIn("memory context", messages[0]["content"])
+        self.assertEqual(messages[-1]["content"], "hello")
 
 
 if __name__ == "__main__":

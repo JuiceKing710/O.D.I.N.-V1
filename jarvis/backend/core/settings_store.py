@@ -11,6 +11,10 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "theme": "system",
     "permissions": {},
     "turbo_mode": False,
+    # When enabled, Odin verifies each reply against the question and provided
+    # context before sending it (generate -> critique -> one corrective regen).
+    # Off by default: it costs extra model calls and disables live streaming.
+    "truthfulness_check": False,
 }
 
 

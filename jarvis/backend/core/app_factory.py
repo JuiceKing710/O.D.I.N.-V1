@@ -10,6 +10,7 @@ from pathlib import Path
 
 from jarvis.backend.bots.code_bot import CodeBot
 from jarvis.backend.bots.file_bot import FileBot
+from jarvis.backend.bots.image_bot import ImageBot
 from jarvis.backend.bots.research_bot import ResearchBot
 from jarvis.backend.bots.system_bot import SystemBot
 from jarvis.backend.core.backup_scheduler import BackupScheduler
@@ -28,6 +29,12 @@ from jarvis.backend.core.vector_store import (
     OllamaEmbedder,
     SqliteVectorStore,
     VectorStoreInterface,
+)
+from jarvis.backend.core.image_manager import (
+    CommandImageAdapter,
+    GeminiImageAdapter,
+    ImageManager,
+    UnconfiguredImageAdapter,
 )
 from jarvis.backend.core.vision_manager import (
     CommandVisionAdapter,
@@ -260,17 +267,26 @@ def get_vision_manager() -> VisionManager:
     # is the default because it runs comfortably offline on an 8 GB Mac; a heavier
     # model like llava is used only if moondream is not installed. Fall back to
     # Gemini just when no local model is present and turbo mode is enabled.
+    # JARVIS_VISION_PROVIDER lets a low-RAM machine outsource vision to the cloud:
+    #   "cloud" -> always use Gemini (skip the ~1.7 GB local model, save RAM)
+    #   "local" -> only ever use a local model (never send frames off-device)
+    #   "auto"  -> local-first with Gemini fallback (default)
+    provider_pref = os.environ.get("JARVIS_VISION_PROVIDER", "auto").strip().lower()
     preferred = os.environ.get("JARVIS_VISION_MODEL")
     candidates = [preferred] if preferred else ["moondream", "llava"]
-    local_model = next(
-        (m for m in candidates if m and OllamaVisionAdapter.available(ollama_base_url, m)),
-        None,
+    local_model = (
+        None
+        if provider_pref == "cloud"
+        else next(
+            (m for m in candidates if m and OllamaVisionAdapter.available(ollama_base_url, m)),
+            None,
+        )
     )
     if vision_command:
         adapter = CommandVisionAdapter(vision_command)
     elif local_model:
         adapter = OllamaVisionAdapter(model=local_model, base_url=ollama_base_url)
-    elif settings.get("turbo_mode") and gemini_key:
+    elif provider_pref != "local" and settings.get("turbo_mode") and gemini_key:
         adapter = GeminiVisionAdapter(
             api_key=gemini_key,
             model=os.environ.get("JARVIS_VISION_GEMINI_MODEL", "gemini-2.5-flash"),
@@ -278,6 +294,32 @@ def get_vision_manager() -> VisionManager:
     else:
         adapter = UnconfiguredVisionAdapter()
     return VisionManager(adapter=adapter, event_bus=get_event_bus())
+
+
+@lru_cache(maxsize=1)
+def get_image_manager() -> ImageManager:
+    # Adapter priority mirrors vision: a local command wins, then cloud Gemini
+    # (turbo), else unconfigured. When a local generator is added later, set
+    # JARVIS_IMAGE_COMMAND and it automatically takes priority — no code change.
+    image_command = os.environ.get("JARVIS_IMAGE_COMMAND")
+    settings = get_settings_store().read()
+    gemini_key = str(settings.get("gemini_api_key") or "").strip()
+    if image_command:
+        adapter = CommandImageAdapter(image_command)
+    elif settings.get("turbo_mode") and gemini_key:
+        adapter = GeminiImageAdapter(
+            api_key=gemini_key,
+            model=os.environ.get(
+                "JARVIS_IMAGE_GEMINI_MODEL", "gemini-2.0-flash-preview-image-generation"
+            ),
+        )
+    else:
+        adapter = UnconfiguredImageAdapter()
+    return ImageManager(
+        adapter=adapter,
+        output_dir=Path(os.environ.get("JARVIS_IMAGE_OUTPUT_DIR", "data/images")),
+        event_bus=get_event_bus(),
+    )
 
 
 @lru_cache(maxsize=1)
@@ -305,6 +347,7 @@ def get_core() -> JarvisCore:
     bot_manager.register(ResearchBot(permission_manager, audit_logger))
     bot_manager.register(CodeBot(permission_manager, audit_logger))
     bot_manager.register(SystemBot(permission_manager, audit_logger))
+    bot_manager.register(ImageBot(permission_manager, audit_logger, get_image_manager()))
 
     if os.environ.get("JARVIS_LLM_PROVIDER") == "echo":
         local_provider: EchoLMProvider | OllamaProvider = EchoLMProvider()
@@ -325,4 +368,5 @@ def get_core() -> JarvisCore:
         lm_provider=lm_provider,
         audit_logger=audit_logger,
         event_bus=event_bus,
+        read_settings=get_settings_store().read,
     )

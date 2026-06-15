@@ -533,6 +533,7 @@ export function ChatView({ onOpenCoreFocus }) {
         id: crypto.randomUUID(),
         role: "assistant",
         content: response.reply,
+        imageUrl: response.image_url || null,
       };
       addMessage(assistantMessage);
       if (voiceEnabled && (backendVoiceAvailable || speech.available)) {
@@ -551,6 +552,28 @@ export function ChatView({ onOpenCoreFocus }) {
   async function handleSubmit(event) {
     event.preventDefault();
     await sendMessage(input);
+  }
+
+  // Generated images are kept in a rolling cache on the backend, so let the user
+  // explicitly save the ones worth keeping to their own machine.
+  async function saveImage(imageUrl) {
+    try {
+      const response = await fetch(resolveApiUrl(imageUrl));
+      if (!response.ok) {
+        throw new Error(`Could not load image (${response.status})`);
+      }
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = imageUrl.split("/").pop() || "odin-image.png";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(objectUrl);
+    } catch (error) {
+      setVoiceNotice(`Could not save image: ${error.message}`);
+    }
   }
 
   return (
@@ -773,6 +796,23 @@ export function ChatView({ onOpenCoreFocus }) {
                 )}
               </div>
               <p>{message.content}</p>
+              {message.imageUrl && (
+                <div className="message-image-wrap">
+                  <img
+                    className="message-image"
+                    src={resolveApiUrl(message.imageUrl)}
+                    alt={message.content || "AI-generated image"}
+                    loading="lazy"
+                  />
+                  <button
+                    type="button"
+                    className="save-image"
+                    onClick={() => saveImage(message.imageUrl)}
+                  >
+                    Save image
+                  </button>
+                </div>
+              )}
             </article>
           ))}
           {streaming?.text && (

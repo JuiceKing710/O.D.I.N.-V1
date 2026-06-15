@@ -13,11 +13,13 @@ from fastapi.testclient import TestClient
 from jarvis.backend.api.main import create_app
 from jarvis.backend.bots.code_bot import CodeBot
 from jarvis.backend.bots.file_bot import FileBot
+from jarvis.backend.bots.image_bot import ImageBot
 from jarvis.backend.bots.system_bot import SystemBot
 from jarvis.backend.core.app_factory import (
     get_backup_scheduler,
     get_core,
     get_event_bus,
+    get_image_manager,
     get_permission_manager,
     get_recovery_manager,
     get_settings_store,
@@ -26,6 +28,7 @@ from jarvis.backend.core.app_factory import (
     get_voice_manager,
     get_wake_word_listener,
 )
+from jarvis.backend.core.image_manager import ImageManager, StubImageAdapter
 from jarvis.backend.core.system_monitor import SystemMonitor
 from jarvis.backend.core.backup_scheduler import BackupScheduler
 from jarvis.backend.core.bot_manager import BotManager
@@ -99,6 +102,9 @@ class ApiTests(unittest.TestCase):
                 ),
                 "read_files": Permission("read_files", "read files", PermissionDecision.PROMPT),
                 "write_files": Permission("write_files", "write files", PermissionDecision.PROMPT),
+                "generate_images": Permission(
+                    "generate_images", "generate images", PermissionDecision.PROMPT
+                ),
             }
         )
         self.permission_manager = permission_manager
@@ -109,6 +115,12 @@ class ApiTests(unittest.TestCase):
         bot_manager.register(CodeBot(permission_manager, audit_logger))
         bot_manager.register(FileBot(permission_manager, audit_logger, self_root=base / "self"))
         bot_manager.register(SystemBot(permission_manager, audit_logger))
+        self.image_manager = ImageManager(
+            adapter=StubImageAdapter(),
+            output_dir=base / "images",
+            event_bus=self.event_bus,
+        )
+        bot_manager.register(ImageBot(permission_manager, audit_logger, self.image_manager))
         self.core = JarvisCore(
             memory=self.memory,
             bot_manager=bot_manager,
@@ -149,6 +161,7 @@ class ApiTests(unittest.TestCase):
         app.dependency_overrides[get_system_monitor] = lambda: SystemMonitor()
         app.dependency_overrides[get_voice_manager] = lambda: self.voice
         app.dependency_overrides[get_vision_manager] = lambda: self.vision
+        app.dependency_overrides[get_image_manager] = lambda: self.image_manager
         self.client = TestClient(app)
 
     def tearDown(self) -> None:
@@ -163,6 +176,35 @@ class ApiTests(unittest.TestCase):
         body = response.json()
         self.assertEqual(body["conversation_id"], 1)
         self.assertIn("I heard: hello from api", body["reply"])
+
+    def test_image_status_endpoint_reports_adapter(self) -> None:
+        response = self.client.get("/api/v1/image/status")
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["adapter"], "stub")
+        self.assertTrue(body["configured"])
+        self.assertFalse(body["network"])
+
+    def test_image_generate_requires_permission_then_serves_file(self) -> None:
+        # First call is gated (generate_images defaults to prompt) -> 403.
+        gated = self.client.post("/api/v1/image/generate", json={"prompt": "a red bicycle"})
+        self.assertEqual(gated.status_code, 403)
+
+        self.permission_manager.update_decisions({"generate_images": "allowed"})
+        generated = self.client.post(
+            "/api/v1/image/generate", json={"prompt": "a red bicycle"}
+        )
+        self.assertEqual(generated.status_code, 200)
+        body = generated.json()
+        self.assertTrue(body["image_url"].startswith("/api/v1/image/file/"))
+
+        served = self.client.get(body["image_url"])
+        self.assertEqual(served.status_code, 200)
+        self.assertTrue(served.content)
+
+    def test_image_file_rejects_path_traversal(self) -> None:
+        response = self.client.get("/api/v1/image/file/..%2f..%2fsettings.json")
+        self.assertEqual(response.status_code, 404)
 
     def test_chat_endpoint_reports_lm_provider_failure(self) -> None:
         self.core.lm_provider = FailingLMProvider()
