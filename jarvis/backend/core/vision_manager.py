@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Protocol
 
 from jarvis.backend.core.event_bus import EventBus
+from jarvis.backend.core.lm_provider import ollama_keep_alive
 
 
 DEFAULT_VISION_PROMPT = (
@@ -102,6 +103,7 @@ class OllamaVisionAdapter:
         self.model = model
         self.base_url = base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
+        self.keep_alive = ollama_keep_alive()
 
     @classmethod
     def available(cls, base_url: str, model: str, timeout_seconds: float = 5.0) -> bool:
@@ -123,6 +125,7 @@ class OllamaVisionAdapter:
                 "model": self.model,
                 "messages": [{"role": "user", "content": prompt, "images": [encoded]}],
                 "stream": False,
+                "keep_alive": self.keep_alive,
             }
         ).encode("utf-8")
         request = urllib.request.Request(

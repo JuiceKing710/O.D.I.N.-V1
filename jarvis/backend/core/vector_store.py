@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
+from jarvis.backend.core.lm_provider import ollama_keep_alive
+
 
 @dataclass(frozen=True, slots=True)
 class VectorSearchResult:
@@ -96,9 +98,12 @@ class OllamaEmbedder:
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.timeout_seconds = timeout_seconds
+        self.keep_alive = ollama_keep_alive()
 
     def __call__(self, text: str) -> list[float]:
-        payload = json.dumps({"model": self.model, "input": text}).encode("utf-8")
+        payload = json.dumps(
+            {"model": self.model, "input": text, "keep_alive": self.keep_alive}
+        ).encode("utf-8")
         request = urllib.request.Request(
             f"{self.base_url}/api/embed",
             data=payload,
