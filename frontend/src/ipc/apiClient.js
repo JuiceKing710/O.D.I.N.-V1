@@ -20,15 +20,11 @@ function defaultApiBaseUrl() {
 const API_BASE_URL = defaultApiBaseUrl();
 const TOKEN_STORAGE_KEY = "odin_token";
 
-export function resolveApiUrl(path) {
-  return new URL(path, API_BASE_URL).toString();
-}
-
 // Media that the browser loads itself — <img src>, <audio src>, and direct
 // fetches for download — can't attach the Authorization header. When remote
 // auth is on, the token therefore rides in the query string, the same escape
 // hatch the WebSocket uses (see connectEvents). With auth off there is no token
-// and this is identical to resolveApiUrl.
+// and this is a plain base-URL join.
 export function resolveMediaUrl(path) {
   const url = new URL(path, API_BASE_URL);
   const token = getAuthToken();

@@ -47,6 +47,14 @@ def line(label: str, verdict: str, detail: str = "") -> None:
     print(f"  [{verdict:^6}] {label}" + (f" :: {detail}" if detail else ""))
 
 
+def _detail(response) -> str:
+    """Best-effort human detail from a failed JSON or plain-text response."""
+    try:
+        return str(response.json().get("detail", "")) or response.text
+    except Exception:  # noqa: BLE001 - detail extraction is best effort
+        return response.text
+
+
 def guard(label: str, fn) -> None:
     try:
         fn()
@@ -107,6 +115,39 @@ def main() -> None:
                  f'saw: "{r.json()["description"][:60]}"  {ms:.0f}ms')
         else:
             line("SIGHT (moondream vision)", "SETUP", f"{r.status_code} {r.text[:100]}")
+
+    def image_gen() -> None:
+        st = client.get(f"{API}/image/status").json()
+        print(f"           image adapter: {st['adapter']}"
+              f"(cfg={st['configured']}, net={st['network']})")
+        pm.update_decisions({"generate_images": "allowed", "access_network": "allowed"})
+        t = time.monotonic()
+        r = client.post(f"{API}/image/generate",
+                        json={"prompt": "a small red bicycle", "sender": "user"})
+        ms = (time.monotonic() - t) * 1000
+        if r.status_code == 200:
+            served = client.get(r.json()["image_url"])
+            line("IMAGE generate (prompt -> file, served)",
+                 "OK" if served.status_code == 200 and served.content else "FAIL",
+                 f"{len(served.content)} bytes, {ms:.0f}ms")
+        else:
+            line("IMAGE generate", "SETUP", f"{r.status_code} {_detail(r)[:90]}")
+
+    def agent_research() -> None:
+        # Echo provider yields a nonsense plan, but the check proves the whole
+        # pipeline wiring: plan -> dispatch research bot -> synthesize -> task.
+        pm.update_decisions({"access_network": "allowed"})
+        t = time.monotonic()
+        r = client.post(f"{API}/agent/research",
+                        json={"goal": "What is the capital of France?", "username": "verify"})
+        ms = (time.monotonic() - t) * 1000
+        if r.status_code == 200:
+            body = r.json()
+            line("AGENT deep-research (plan->search->read->report)",
+                 "OK" if body.get("report") and body.get("task_id") else "WARN",
+                 f"{len(body.get('sources', []))} sources, {ms:.0f}ms")
+        else:
+            line("AGENT deep-research", "SETUP", f"{r.status_code} {_detail(r)[:90]}")
 
     def file_rw() -> None:
         target = REPO / "data" / "verify_scratch.txt"
@@ -205,8 +246,9 @@ def main() -> None:
 
     for label, fn in [
         ("voice OUT", voice_out), ("voice IN", voice_in), ("SIGHT", sight),
-        ("FILE", file_rw), ("SYSTEM", system_exec), ("WEB", web),
-        ("WEB fetch", web_fetch), ("AUDIT", audit), ("TRUTH", truthfulness),
+        ("IMAGE", image_gen), ("FILE", file_rw), ("SYSTEM", system_exec),
+        ("WEB", web), ("WEB fetch", web_fetch), ("AGENT", agent_research),
+        ("AUDIT", audit), ("TRUTH", truthfulness),
     ]:
         guard(label, fn)
 

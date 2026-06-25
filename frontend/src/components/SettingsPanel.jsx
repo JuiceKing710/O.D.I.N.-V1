@@ -3,6 +3,7 @@ import {
   checkRecoveryIntegrity,
   createRecoveryBackup,
   fetchBackupSchedule,
+  fetchImageStatus,
   fetchMemoryStatus,
   fetchModels,
   getAuthToken,
@@ -43,6 +44,7 @@ export function SettingsPanel() {
   const [geminiKeyDraft, setGeminiKeyDraft] = useState("");
   const [savingTurbo, setSavingTurbo] = useState(false);
   const [voiceStatus, setVoiceStatus] = useState(null);
+  const [imageStatus, setImageStatus] = useState(null);
   const [voiceTesting, setVoiceTesting] = useState(false);
   const [voiceSetupLoading, setVoiceSetupLoading] = useState(false);
   const [voiceModeDraft, setVoiceModeDraft] = useState("push_to_talk");
@@ -84,6 +86,15 @@ export function SettingsPanel() {
         if (!cancelled) {
           setError(err.message);
         }
+      });
+    fetchImageStatus()
+      .then((status) => {
+        if (!cancelled) {
+          setImageStatus(status);
+        }
+      })
+      .catch(() => {
+        // Image status is informational; leave it null if the call fails.
       });
     fetchMemoryStatus()
       .then((status) => {
@@ -514,6 +525,28 @@ ollama pull llama3.2`}</pre>
               />
               Verify each reply before sending
             </label>
+          </section>
+
+          <section className="settings-section" aria-label="Image generation">
+            <div className="section-heading">
+              <h2>Image Generation</h2>
+              <span className={imageStatus?.configured ? "status-ok" : "status-muted"}>
+                {imageStatus
+                  ? imageStatus.configured
+                    ? `Ready · ${imageStatus.adapter}`
+                    : "Not configured"
+                  : "Checking…"}
+              </span>
+            </div>
+            <p className="section-hint">
+              Ask Odin to "generate an image of…" in chat, or use{" "}
+              <code>/image &lt;prompt&gt;</code>.{" "}
+              {imageStatus && !imageStatus.configured
+                ? "No generator is set up yet — turn on Turbo Mode with a Gemini key, or set JARVIS_IMAGE_COMMAND for a local generator."
+                : imageStatus?.network
+                  ? "The active generator is cloud-based, so prompts and images leave this machine."
+                  : "Images are generated locally on this machine."}
+            </p>
           </section>
 
           <section className="settings-section" aria-label="Remote access">

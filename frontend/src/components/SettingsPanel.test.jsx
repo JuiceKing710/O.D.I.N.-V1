@@ -9,6 +9,7 @@ vi.mock("../ipc/apiClient.js", () => ({
   checkRecoveryIntegrity: vi.fn(),
   createRecoveryBackup: vi.fn(),
   fetchBackupSchedule: vi.fn(),
+  fetchImageStatus: vi.fn(),
   fetchMemoryStatus: vi.fn(),
   fetchModels: vi.fn(),
   fetchPermissionRequests: vi.fn(),
@@ -47,6 +48,12 @@ describe("SettingsPanel", () => {
       tts_configured: true,
     });
     api.fetchMemoryStatus.mockResolvedValue({ vector: { enabled: false, provider: "null" } });
+    api.fetchImageStatus.mockResolvedValue({
+      state: "idle",
+      adapter: "unconfigured",
+      configured: false,
+      network: false,
+    });
     api.checkRecoveryIntegrity.mockResolvedValue({
       ok: true,
       sqlite_ok: true,
