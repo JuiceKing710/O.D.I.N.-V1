@@ -74,7 +74,11 @@ def create_app() -> FastAPI:
             await monitor.stop()
             await scheduler.stop()
 
-    app = FastAPI(title="Jarvis V1.1", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(
+        title="O.D.I.N. — Optical Detection & Intelligence Network",
+        version="0.1.0",
+        lifespan=lifespan,
+    )
 
     @app.get("/healthz")
     def healthz() -> dict[str, bool]:

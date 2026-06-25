@@ -81,7 +81,7 @@ export function DataPanel() {
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `jarvis-conversation-${conversation.convo_id}.json`;
+      link.download = `odin-conversation-${conversation.convo_id}.json`;
       link.click();
       URL.revokeObjectURL(url);
     } catch (requestError) {
