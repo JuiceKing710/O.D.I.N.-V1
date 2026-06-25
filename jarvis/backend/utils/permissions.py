@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import StrEnum
@@ -57,6 +59,12 @@ class PermissionManager:
         self.storage_path = storage_path
         self._pending_requests: dict[str, PermissionRequest] = {}
         self._one_time_grants: dict[tuple[str, str, str], int] = {}
+        # Pre-approved permission scopes, keyed by scope id. While a scope is
+        # open, the permissions it lists are treated as allowed without prompting
+        # — this is how an autonomous agent runs a whole plan unattended after
+        # the user grants it a scope up front. A scope never overrides a hard
+        # `denied` default, so execute_scripts stays locked unless explicitly on.
+        self._active_scopes: dict[str, set[str]] = {}
         self._load_pending_requests()
 
     @classmethod
@@ -107,6 +115,9 @@ class PermissionManager:
         if decision == PermissionDecision.DENIED:
             raise PermissionError(f"Permission {permission_name} is denied")
 
+        if self._in_open_scope(permission_name):
+            return
+
         grant_key = (permission_name, actor, reason)
         remaining_grants = self._one_time_grants.get(grant_key, 0)
         if remaining_grants:
@@ -145,6 +156,32 @@ class PermissionManager:
             self._one_time_grants[grant_key] = self._one_time_grants.get(grant_key, 0) + 1
         self._save_pending_requests()
         return request
+
+    def open_scope(self, permissions: Iterable[str]) -> str:
+        """Pre-approve `permissions` until the returned scope id is closed.
+
+        Used by autonomous agents: the user grants the scope once at launch and
+        the agent then runs its full plan without per-step prompts. Hard-denied
+        permissions are intentionally not elevated by a scope.
+        """
+        scope_id = uuid4().hex
+        self._active_scopes[scope_id] = set(permissions)
+        return scope_id
+
+    def close_scope(self, scope_id: str) -> None:
+        self._active_scopes.pop(scope_id, None)
+
+    @contextmanager
+    def scope(self, permissions: Iterable[str]) -> Iterator[str]:
+        """Context-managed scope that always closes, even if the agent errors."""
+        scope_id = self.open_scope(permissions)
+        try:
+            yield scope_id
+        finally:
+            self.close_scope(scope_id)
+
+    def _in_open_scope(self, permission_name: str) -> bool:
+        return any(permission_name in granted for granted in self._active_scopes.values())
 
     def as_settings(self) -> dict[str, str]:
         return {name: permission.default.value for name, permission in self._permissions.items()}

@@ -41,6 +41,8 @@ from jarvis.backend.api.models import (
     PermissionRequestResponse,
     PermissionResolveRequest,
     PermissionResolveResponse,
+    ResearchAgentRequest,
+    ResearchAgentResponse,
     SettingsResponse,
     SettingsUpdateRequest,
     StartupHealthResponse,
@@ -64,6 +66,7 @@ from jarvis.backend.api.models import (
     VoiceTranscribeResponse,
 )
 from jarvis.backend.core.app_factory import (
+    get_agent_manager,
     get_backup_scheduler,
     get_audit_logger,
     get_core,
@@ -78,6 +81,7 @@ from jarvis.backend.core.app_factory import (
     get_voice_manager,
     get_wake_word_listener,
 )
+from jarvis.backend.core.agent_manager import DeepResearchAgent
 from jarvis.backend.core.memory_consolidator import MemoryConsolidator
 from jarvis.backend.core.wake_word import WakeWordListener
 from jarvis.backend.core.backup_scheduler import BackupScheduler
@@ -858,6 +862,24 @@ def image_file(
     if image_path.parent != output_dir or not image_path.is_file():
         raise HTTPException(status_code=404, detail=f"Image not found: {filename}")
     return FileResponse(image_path)
+
+
+@router.post("/agent/research", response_model=ResearchAgentResponse)
+async def run_research_agent(
+    request: ResearchAgentRequest,
+    agent: DeepResearchAgent = Depends(get_agent_manager),
+) -> ResearchAgentResponse:
+    # Full-autonomy-in-a-scope: the agent opens a pre-approved permission scope
+    # internally and runs the whole plan unattended, streaming agent.* events.
+    try:
+        result = await agent.run_research(request.goal, request.username)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=503, detail=f"Research agent unavailable: {exc}"
+        ) from exc
+    return ResearchAgentResponse(**result)
 
 
 @router.get("/recovery/integrity", response_model=IntegrityResponse)

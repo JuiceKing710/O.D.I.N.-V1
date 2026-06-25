@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { AgentsView } from "./components/AgentsView.jsx";
 import { ChatDock } from "./components/ChatDock.jsx";
 import { ChatView } from "./components/ChatView.jsx";
 import { CoreFocusView } from "./components/CoreFocusView.jsx";
@@ -13,6 +14,7 @@ import { TokenGate } from "./components/TokenGate.jsx";
 import { TopStrip } from "./components/TopStrip.jsx";
 import { connectEvents, fetchSystemOverview } from "./ipc/apiClient.js";
 import { AppStateProvider, useAppState } from "./state/appContext.jsx";
+import { useAgentStore } from "./state/agentStore.js";
 import { useChatStore } from "./state/chatStore.js";
 import { useSystemStore } from "./state/systemStore.js";
 import "./styles.css";
@@ -20,6 +22,7 @@ import "./styles.css";
 const PANELS = [
   { id: "overview", label: "Overview", glyph: "◉" },
   { id: "chat", label: "Chat", glyph: "◍" },
+  { id: "agents", label: "Agents", glyph: "⬨" },
   { id: "workflows", label: "Workflows", glyph: "⬡" },
   { id: "data", label: "Data Map", glyph: "⬢" },
   { id: "settings", label: "Configuration", glyph: "⚙" },
@@ -34,6 +37,7 @@ function App() {
   const voiceState = useChatStore((state) => state.voiceState);
   const applyEvent = useChatStore((state) => state.applyEvent);
   const applySystemEvent = useSystemStore((state) => state.applySystemEvent);
+  const applyAgentEvent = useAgentStore((state) => state.applyAgentEvent);
   const setOverview = useSystemStore((state) => state.setOverview);
   const panelCounts = {
     chat: messages.length,
@@ -45,8 +49,9 @@ function App() {
       connectEvents((event) => {
         applyEvent(event);
         applySystemEvent(event);
+        applyAgentEvent(event);
       }),
-    [applyEvent, applySystemEvent],
+    [applyEvent, applySystemEvent, applyAgentEvent],
   );
 
   useEffect(() => {
@@ -135,6 +140,7 @@ function App() {
               </>
             )}
             {activePanel === "chat" && <ChatView onOpenCoreFocus={() => setCoreFocus(true)} />}
+            {activePanel === "agents" && <AgentsView />}
             {activePanel === "workflows" && <ProjectDashboard />}
             {activePanel === "data" && <DataPanel />}
             {activePanel === "settings" && <SettingsPanel />}

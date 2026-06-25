@@ -9,6 +9,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from jarvis.backend.bots.code_bot import CodeBot
+from jarvis.backend.core.agent_manager import DeepResearchAgent
 from jarvis.backend.bots.file_bot import FileBot
 from jarvis.backend.bots.image_bot import ImageBot
 from jarvis.backend.bots.research_bot import ResearchBot
@@ -318,6 +319,18 @@ def get_image_manager() -> ImageManager:
     return ImageManager(
         adapter=adapter,
         output_dir=Path(os.environ.get("JARVIS_IMAGE_OUTPUT_DIR", "data/images")),
+        event_bus=get_event_bus(),
+    )
+
+
+@lru_cache(maxsize=1)
+def get_agent_manager() -> DeepResearchAgent:
+    core = get_core()
+    return DeepResearchAgent(
+        lm_provider=core.lm_provider,
+        bot_manager=core.bot_manager,
+        memory=core.memory,
+        audit_logger=get_audit_logger(),
         event_bus=get_event_bus(),
     )
 

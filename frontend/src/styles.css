@@ -2907,3 +2907,106 @@ textarea:focus-visible {
   color: var(--odin-green);
   font-size: 0.76rem;
 }
+
+/* Deep Research agent panel */
+.agents-header p {
+  margin: 6px 0 0;
+  color: var(--muted, #9aa3c4);
+  font-size: 0.82rem;
+  max-width: 60ch;
+}
+
+.agents-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 16px 0;
+}
+
+.agents-composer textarea {
+  width: 100%;
+  resize: vertical;
+  background: var(--accent-soft);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text);
+  padding: 10px 12px;
+  font: inherit;
+}
+
+.agents-composer button {
+  align-self: flex-start;
+}
+
+.agent-run {
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+}
+
+.agent-goal-label {
+  margin: 0 0 12px;
+  font-size: 0.84rem;
+}
+
+.agent-plan ol {
+  margin: 4px 0 14px;
+  padding-left: 20px;
+  color: var(--muted, #9aa3c4);
+  font-size: 0.82rem;
+}
+
+.agent-steps {
+  list-style: none;
+  margin: 0 0 14px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.agent-step {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 0.84rem;
+}
+
+.agent-step-glyph {
+  color: var(--accent);
+}
+
+.agent-step.done .agent-step-glyph {
+  color: var(--odin-green, #4ade80);
+}
+
+.agent-step.error .agent-step-glyph {
+  color: #ff6b6b;
+}
+
+.agent-step small {
+  color: #ff9b9b;
+  font-size: 0.74rem;
+}
+
+.agent-report {
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  padding: 14px 16px;
+  background: var(--accent-soft);
+}
+
+.agent-report p {
+  white-space: pre-wrap;
+  line-height: 1.5;
+  font-size: 0.88rem;
+}
+
+.agent-sources ol {
+  margin: 6px 0 0;
+  padding-left: 20px;
+  font-size: 0.8rem;
+}
+
+.agent-sources a {
+  color: var(--accent-bright);
+}

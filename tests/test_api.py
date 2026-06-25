@@ -19,6 +19,8 @@ from jarvis.backend.utils.auth import (
 )
 
 from jarvis.backend.api.main import create_app
+from jarvis.backend.core.agent_manager import DeepResearchAgent
+from jarvis.backend.core.app_factory import get_agent_manager
 from jarvis.backend.bots.code_bot import CodeBot
 from jarvis.backend.bots.file_bot import FileBot
 from jarvis.backend.bots.image_bot import ImageBot
@@ -51,6 +53,8 @@ from jarvis.backend.core.vision_manager import VisionManager
 from jarvis.backend.core.voice_manager import VoiceManager, WhisperCliSpeechToTextAdapter
 from jarvis.backend.utils.audit_logging import AuditLogger
 from jarvis.backend.utils.permissions import Permission, PermissionDecision, PermissionManager
+
+from tests.test_agent import FakeResearchBot, ScriptedLMProvider
 
 
 class FailingLMProvider(EchoLMProvider):
@@ -110,6 +114,9 @@ class ApiTests(unittest.TestCase):
                 ),
                 "read_files": Permission("read_files", "read files", PermissionDecision.PROMPT),
                 "write_files": Permission("write_files", "write files", PermissionDecision.PROMPT),
+                "access_network": Permission(
+                    "access_network", "network", PermissionDecision.PROMPT
+                ),
                 "generate_images": Permission(
                     "generate_images", "generate images", PermissionDecision.PROMPT
                 ),
@@ -209,6 +216,31 @@ class ApiTests(unittest.TestCase):
         served = self.client.get(body["image_url"])
         self.assertEqual(served.status_code, 200)
         self.assertTrue(served.content)
+
+    def test_research_agent_endpoint_runs_unattended(self) -> None:
+        bot_manager = self.core.bot_manager
+        bot_manager.register(FakeResearchBot(self.permission_manager, bot_manager.audit_logger))
+        agent = DeepResearchAgent(
+            lm_provider=ScriptedLMProvider(),
+            bot_manager=bot_manager,
+            memory=self.memory,
+            audit_logger=bot_manager.audit_logger,
+            event_bus=self.event_bus,
+        )
+        self.client.app.dependency_overrides[get_agent_manager] = lambda: agent
+
+        response = self.client.post(
+            "/api/v1/agent/research",
+            json={"goal": "what is odysseus", "username": "agent-user"},
+        )
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertIn("Grounded report", body["report"])
+        self.assertEqual(len(body["sources"]), 2)
+        self.assertTrue(body["task_id"])
+        # access_network defaulted to prompt, yet the run left no pending approval:
+        # the agent's scope carried it through unattended.
+        self.assertEqual(self.permission_manager.pending_requests(), [])
 
     def test_image_file_rejects_path_traversal(self) -> None:
         response = self.client.get("/api/v1/image/file/..%2f..%2fsettings.json")

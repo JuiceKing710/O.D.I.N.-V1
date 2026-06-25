@@ -279,6 +279,25 @@ class ImageGenerateResponse(BaseModel):
     state: Literal["idle", "generating"]
 
 
+class ResearchAgentRequest(BaseModel):
+    goal: str = Field(min_length=1)
+    username: str = Field(default="local-user", min_length=1)
+
+
+class ResearchAgentSource(BaseModel):
+    title: str
+    url: str
+
+
+class ResearchAgentResponse(BaseModel):
+    run_id: str
+    goal: str
+    report: str
+    sources: list[ResearchAgentSource] = Field(default_factory=list)
+    queries: list[str] = Field(default_factory=list)
+    task_id: int
+
+
 class IntegrityResponse(BaseModel):
     ok: bool
     sqlite_ok: bool
