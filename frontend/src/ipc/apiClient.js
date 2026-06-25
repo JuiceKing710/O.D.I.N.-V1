@@ -24,6 +24,20 @@ export function resolveApiUrl(path) {
   return new URL(path, API_BASE_URL).toString();
 }
 
+// Media that the browser loads itself — <img src>, <audio src>, and direct
+// fetches for download — can't attach the Authorization header. When remote
+// auth is on, the token therefore rides in the query string, the same escape
+// hatch the WebSocket uses (see connectEvents). With auth off there is no token
+// and this is identical to resolveApiUrl.
+export function resolveMediaUrl(path) {
+  const url = new URL(path, API_BASE_URL);
+  const token = getAuthToken();
+  if (token) {
+    url.searchParams.set("token", token);
+  }
+  return url.toString();
+}
+
 export function getAuthToken() {
   if (globalThis.jarvisDesktop?.apiToken) {
     return globalThis.jarvisDesktop.apiToken;

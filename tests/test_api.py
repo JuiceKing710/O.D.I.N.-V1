@@ -874,6 +874,14 @@ class AuthMiddlewareTests(unittest.TestCase):
         # OPTIONS preflight must not be blocked by auth (CORS handles it).
         self.assertNotEqual(client.options("/api/v1/ping").status_code, 401)
 
+    def test_http_get_allows_query_param_token(self) -> None:
+        # Browser-loaded media (<img>/<audio> src, download fetch) can't set the
+        # Authorization header, so a plain GET must authenticate via ?token=.
+        # This is the contract the frontend's resolveMediaUrl relies on.
+        client = TestClient(_auth_app("s3cret"))
+        self.assertEqual(client.get("/api/v1/ping?token=s3cret").status_code, 200)
+        self.assertEqual(client.get("/api/v1/ping?token=wrong").status_code, 401)
+
     def test_websocket_requires_token_query_param(self) -> None:
         client = TestClient(_auth_app("s3cret"))
         with client.websocket_connect("/api/v1/ws?token=s3cret") as websocket:

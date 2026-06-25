@@ -47,7 +47,7 @@ vi.mock("../ipc/apiClient.js", () => ({
   fetchVoiceStatus: vi.fn().mockResolvedValue({ tts_configured: true }),
   fetchVisionStatus: vi.fn().mockResolvedValue({ configured: true, adapter: "ollama-vision" }),
   analyzeVisionImage: (...args) => analyzeVisionImage(...args),
-  resolveApiUrl: vi.fn((path) => path),
+  resolveMediaUrl: vi.fn((path) => path),
   sendChatMessage: vi.fn().mockResolvedValue({ conversation_id: 1, reply: "I see you." }),
   synthesizeVoice: vi.fn(),
   transcribeVoiceAudio: vi.fn(),

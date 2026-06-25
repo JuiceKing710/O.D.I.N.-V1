@@ -8,7 +8,7 @@ import {
   fetchModels,
   fetchReflections,
   fetchVoiceStatus,
-  resolveApiUrl,
+  resolveMediaUrl,
   sendChatMessage,
   synthesizeVoice,
   transcribeVoiceAudio,
@@ -244,7 +244,7 @@ export function ChatView({ onOpenCoreFocus }) {
         const response = await synthesizeVoice({ text: message.content });
         const audio = new Audio();
         audio.crossOrigin = "anonymous";
-        audio.src = resolveApiUrl(response.audio_url);
+        audio.src = resolveMediaUrl(response.audio_url);
         audioRef.current = audio;
         setBackendSpeaking(true);
         connectSpeechAnalyser(audio);
@@ -558,7 +558,7 @@ export function ChatView({ onOpenCoreFocus }) {
   // explicitly save the ones worth keeping to their own machine.
   async function saveImage(imageUrl) {
     try {
-      const response = await fetch(resolveApiUrl(imageUrl));
+      const response = await fetch(resolveMediaUrl(imageUrl));
       if (!response.ok) {
         throw new Error(`Could not load image (${response.status})`);
       }
@@ -800,7 +800,7 @@ export function ChatView({ onOpenCoreFocus }) {
                 <div className="message-image-wrap">
                   <img
                     className="message-image"
-                    src={resolveApiUrl(message.imageUrl)}
+                    src={resolveMediaUrl(message.imageUrl)}
                     alt={message.content || "AI-generated image"}
                     loading="lazy"
                   />

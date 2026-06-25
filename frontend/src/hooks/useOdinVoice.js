@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useSpeechSynthesis } from "./useSpeechSynthesis.js";
-import { fetchVoiceStatus, resolveApiUrl, synthesizeVoice } from "../ipc/apiClient.js";
+import { fetchVoiceStatus, resolveMediaUrl, synthesizeVoice } from "../ipc/apiClient.js";
 import { useChatStore } from "../state/chatStore.js";
 import { attachOdinAnalyser, detachOdinAnalyser } from "../state/odinPresence.js";
 
@@ -87,7 +87,7 @@ export function useOdinVoice() {
         const response = await synthesizeVoice({ text: cleaned });
         const audio = new Audio();
         audio.crossOrigin = "anonymous";
-        audio.src = resolveApiUrl(response.audio_url);
+        audio.src = resolveMediaUrl(response.audio_url);
         audioRef.current = audio;
         connectAnalyser(audio);
         audio.onended = () => {

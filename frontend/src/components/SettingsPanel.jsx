@@ -10,7 +10,7 @@ import {
   fetchRecoveryBackups,
   fetchVoiceStatus,
   loadModel,
-  resolveApiUrl,
+  resolveMediaUrl,
   resolvePermissionRequest,
   restoreRecoveryBackup,
   synthesizeVoice,
@@ -283,7 +283,7 @@ export function SettingsPanel() {
         ...(current || {}),
         state: response.state,
       }));
-      const audio = new Audio(resolveApiUrl(response.audio_url));
+      const audio = new Audio(resolveMediaUrl(response.audio_url));
       await audio.play();
       setSaveNotice("Backend voice test played.");
     } catch (err) {
