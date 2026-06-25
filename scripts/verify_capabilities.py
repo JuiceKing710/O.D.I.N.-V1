@@ -135,19 +135,26 @@ def main() -> None:
 
     def agent_research() -> None:
         # Echo provider yields a nonsense plan, but the check proves the whole
-        # pipeline wiring: plan -> dispatch research bot -> synthesize -> task.
+        # pipeline wiring: fire-and-poll start -> plan -> dispatch research bot
+        # -> synthesize -> task, polled via the status endpoint.
         pm.update_decisions({"access_network": "allowed"})
         t = time.monotonic()
-        r = client.post(f"{API}/agent/research",
-                        json={"goal": "What is the capital of France?", "username": "verify"})
+        start = client.post(f"{API}/agent/research",
+                            json={"goal": "What is the capital of France?", "username": "verify"})
+        if start.status_code != 202:
+            return line("AGENT deep-research", "SETUP", f"{start.status_code} {_detail(start)[:90]}")
+        run_id = start.json()["run_id"]
+        body = {}
+        for _ in range(150):
+            body = client.get(f"{API}/agent/research/{run_id}").json()
+            if body.get("status") != "running":
+                break
+            time.sleep(0.1)
         ms = (time.monotonic() - t) * 1000
-        if r.status_code == 200:
-            body = r.json()
-            line("AGENT deep-research (plan->search->read->report)",
-                 "OK" if body.get("report") and body.get("task_id") else "WARN",
-                 f"{len(body.get('sources', []))} sources, {ms:.0f}ms")
-        else:
-            line("AGENT deep-research", "SETUP", f"{r.status_code} {_detail(r)[:90]}")
+        ok = body.get("status") == "complete" and body.get("report")
+        line("AGENT deep-research (fire-and-poll, plan->search->read->report)",
+             "OK" if ok else "WARN",
+             f"{body.get('status')}, {len(body.get('sources', []))} sources, {ms:.0f}ms")
 
     def file_rw() -> None:
         target = REPO / "data" / "verify_scratch.txt"

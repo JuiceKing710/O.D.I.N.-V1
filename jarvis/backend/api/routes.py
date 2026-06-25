@@ -42,7 +42,7 @@ from jarvis.backend.api.models import (
     PermissionResolveRequest,
     PermissionResolveResponse,
     ResearchAgentRequest,
-    ResearchAgentResponse,
+    ResearchRunResponse,
     SettingsResponse,
     SettingsUpdateRequest,
     StartupHealthResponse,
@@ -864,22 +864,32 @@ def image_file(
     return FileResponse(image_path)
 
 
-@router.post("/agent/research", response_model=ResearchAgentResponse)
-async def run_research_agent(
+@router.post("/agent/research", response_model=ResearchRunResponse, status_code=202)
+async def start_research_agent(
     request: ResearchAgentRequest,
     agent: DeepResearchAgent = Depends(get_agent_manager),
-) -> ResearchAgentResponse:
+) -> ResearchRunResponse:
+    # Fire-and-poll: the run starts in the background and returns its run_id
+    # immediately, so a long research run never holds the HTTP request open.
     # Full-autonomy-in-a-scope: the agent opens a pre-approved permission scope
     # internally and runs the whole plan unattended, streaming agent.* events.
+    # Poll GET /agent/research/{run_id} (or listen to agent.* events) for results.
     try:
-        result = await agent.run_research(request.goal, request.username)
+        result = agent.start_research(request.goal, request.username)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except RuntimeError as exc:
-        raise HTTPException(
-            status_code=503, detail=f"Research agent unavailable: {exc}"
-        ) from exc
-    return ResearchAgentResponse(**result)
+    return ResearchRunResponse(**result)
+
+
+@router.get("/agent/research/{run_id}", response_model=ResearchRunResponse)
+def get_research_agent_run(
+    run_id: str,
+    agent: DeepResearchAgent = Depends(get_agent_manager),
+) -> ResearchRunResponse:
+    result = agent.get_run(run_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"Research run not found: {run_id}")
+    return ResearchRunResponse(**result)
 
 
 @router.get("/recovery/integrity", response_model=IntegrityResponse)

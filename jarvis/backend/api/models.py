@@ -289,13 +289,25 @@ class ResearchAgentSource(BaseModel):
     url: str
 
 
-class ResearchAgentResponse(BaseModel):
+class ResearchAgentStep(BaseModel):
+    kind: str
+    label: str
+    status: str
+    detail: str = ""
+
+
+class ResearchRunResponse(BaseModel):
     run_id: str
     goal: str
-    report: str
-    sources: list[ResearchAgentSource] = Field(default_factory=list)
+    status: Literal["running", "complete", "error"]
+    task_id: int | None = None
     queries: list[str] = Field(default_factory=list)
-    task_id: int
+    steps: list[ResearchAgentStep] = Field(default_factory=list)
+    report: str = ""
+    sources: list[ResearchAgentSource] = Field(default_factory=list)
+    error: str | None = None
+    created_at: str
+    updated_at: str
 
 
 class IntegrityResponse(BaseModel):

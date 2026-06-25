@@ -167,14 +167,19 @@ export function generateImage({ prompt, sender = "local-user" }) {
   });
 }
 
-// Kicks off an unattended deep-research run. The HTTP response resolves with
-// the final report once the whole plan finishes; live step-by-step progress
-// arrives separately over the event WebSocket as agent.* events.
+// Fire-and-poll: starts an unattended deep-research run and resolves
+// immediately with the run snapshot (run_id, status "running"). Progress
+// arrives via agent.* WebSocket events; the final report is read by polling
+// fetchResearchRun(run_id) until status is "complete" or "error".
 export function runResearchAgent({ goal, username = "local-user" }) {
   return request("/api/v1/agent/research", {
     method: "POST",
     body: JSON.stringify({ goal, username }),
   });
+}
+
+export function fetchResearchRun(runId) {
+  return request(`/api/v1/agent/research/${encodeURIComponent(runId)}`);
 }
 
 export function updateSettings(patch) {

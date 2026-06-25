@@ -15,9 +15,35 @@ const emptyRun = {
   error: "",
 };
 
+// The backend reports "complete"; the store uses "done" as its terminal label.
+function normalizeStatus(status) {
+  return status === "complete" ? "done" : status;
+}
+
 export const useAgentStore = create((set) => ({
   run: { ...emptyRun },
   startRun: (goal) => set({ run: { ...emptyRun, status: "starting", goal } }),
+  // Authoritative status from a poll of GET /agent/research/{run_id}. Ignored if
+  // it refers to a stale run (a newer run has since started).
+  applyRunSnapshot: (snapshot) =>
+    set((state) => {
+      if (!snapshot || (state.run.runId && snapshot.run_id !== state.run.runId)) {
+        return {};
+      }
+      return {
+        run: {
+          runId: snapshot.run_id,
+          taskId: snapshot.task_id ?? null,
+          status: normalizeStatus(snapshot.status),
+          goal: snapshot.goal || state.run.goal,
+          queries: snapshot.queries || [],
+          steps: snapshot.steps || [],
+          report: snapshot.report || "",
+          sources: snapshot.sources || [],
+          error: snapshot.error || "",
+        },
+      };
+    }),
   applyAgentEvent: (event) =>
     set((state) => {
       if (!event.type || !event.type.startsWith("agent.")) {

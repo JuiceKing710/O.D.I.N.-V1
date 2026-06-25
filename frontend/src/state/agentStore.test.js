@@ -51,6 +51,34 @@ describe("agentStore", () => {
     expect(steps[0].status).toBe("done");
   });
 
+  it("applies a poll snapshot and maps complete -> done", () => {
+    useAgentStore.getState().startRun("g");
+    useAgentStore.getState().applyRunSnapshot({
+      run_id: "r9",
+      goal: "g",
+      status: "complete",
+      task_id: 3,
+      queries: ["q1"],
+      steps: [{ label: "Search: q1", kind: "search", status: "done" }],
+      report: "final",
+      sources: [{ title: "T", url: "u" }],
+    });
+    const { run } = useAgentStore.getState();
+    expect(run.status).toBe("done");
+    expect(run.runId).toBe("r9");
+    expect(run.report).toBe("final");
+    expect(run.steps).toHaveLength(1);
+  });
+
+  it("ignores a snapshot from a stale run", () => {
+    useAgentStore.setState({
+      run: { runId: "current", status: "running", goal: "g", queries: [], steps: [], report: "", sources: [], error: "" },
+    });
+    useAgentStore.getState().applyRunSnapshot({ run_id: "old", status: "complete", report: "stale" });
+    expect(useAgentStore.getState().run.report).toBe("");
+    expect(useAgentStore.getState().run.runId).toBe("current");
+  });
+
   it("captures errors", () => {
     apply({ type: "agent.started", payload: { run_id: "r1", goal: "g" } });
     apply({ type: "agent.error", payload: { error: "boom" } });

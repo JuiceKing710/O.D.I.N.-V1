@@ -217,7 +217,9 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(served.status_code, 200)
         self.assertTrue(served.content)
 
-    def test_research_agent_endpoint_runs_unattended(self) -> None:
+    def test_research_agent_fire_and_poll(self) -> None:
+        import time
+
         bot_manager = self.core.bot_manager
         bot_manager.register(FakeResearchBot(self.permission_manager, bot_manager.audit_logger))
         agent = DeepResearchAgent(
@@ -229,18 +231,37 @@ class ApiTests(unittest.TestCase):
         )
         self.client.app.dependency_overrides[get_agent_manager] = lambda: agent
 
-        response = self.client.post(
+        # POST returns immediately with a run id (202), not the finished report.
+        start = self.client.post(
             "/api/v1/agent/research",
             json={"goal": "what is odysseus", "username": "agent-user"},
         )
-        self.assertEqual(response.status_code, 200)
-        body = response.json()
+        self.assertEqual(start.status_code, 202)
+        run_id = start.json()["run_id"]
+        self.assertEqual(start.json()["status"], "running")
+
+        # Poll the status endpoint until the background run finishes.
+        body = None
+        for _ in range(200):
+            poll = self.client.get(f"/api/v1/agent/research/{run_id}")
+            self.assertEqual(poll.status_code, 200)
+            body = poll.json()
+            if body["status"] != "running":
+                break
+            time.sleep(0.02)
+
+        self.assertEqual(body["status"], "complete")
         self.assertIn("Grounded report", body["report"])
         self.assertEqual(len(body["sources"]), 2)
+        self.assertTrue(body["steps"])
         self.assertTrue(body["task_id"])
         # access_network defaulted to prompt, yet the run left no pending approval:
         # the agent's scope carried it through unattended.
         self.assertEqual(self.permission_manager.pending_requests(), [])
+
+    def test_research_agent_unknown_run_404(self) -> None:
+        response = self.client.get("/api/v1/agent/research/does-not-exist")
+        self.assertEqual(response.status_code, 404)
 
     def test_image_file_rejects_path_traversal(self) -> None:
         response = self.client.get("/api/v1/image/file/..%2f..%2fsettings.json")

@@ -1,17 +1,30 @@
-import React, { useState } from "react";
-import { runResearchAgent } from "../ipc/apiClient.js";
+import React, { useEffect, useRef, useState } from "react";
+import { fetchResearchRun, runResearchAgent } from "../ipc/apiClient.js";
 import { useAgentStore } from "../state/agentStore.js";
 import { useAppState } from "../state/appContext.jsx";
 
 const STATUS_GLYPH = { running: "◌", done: "✓", error: "✕" };
+const POLL_INTERVAL_MS = 1500;
 
 export function AgentsView() {
   const [goal, setGoal] = useState("");
   const [error, setError] = useState("");
   const run = useAgentStore((state) => state.run);
   const startRun = useAgentStore((state) => state.startRun);
+  const applyRunSnapshot = useAgentStore((state) => state.applyRunSnapshot);
   const { currentUser } = useAppState();
   const busy = run.status === "starting" || run.status === "running";
+  const pollRef = useRef(null);
+
+  function stopPolling() {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  }
+
+  // Stop polling if the panel unmounts mid-run.
+  useEffect(() => stopPolling, []);
 
   async function launch(event) {
     event.preventDefault();
@@ -20,13 +33,30 @@ export function AgentsView() {
       return;
     }
     setError("");
+    stopPolling();
     startRun(trimmed);
+    let snapshot;
     try {
-      // Live progress arrives via agent.* events; this resolves at completion.
-      await runResearchAgent({ goal: trimmed, username: currentUser.username });
+      // Returns immediately with the run id; the run continues in the background.
+      snapshot = await runResearchAgent({ goal: trimmed, username: currentUser.username });
     } catch (requestError) {
       setError(requestError.message);
+      return;
     }
+    applyRunSnapshot(snapshot);
+    // Poll for the final report (WS agent.* events also update the store live).
+    const runId = snapshot.run_id;
+    pollRef.current = setInterval(async () => {
+      try {
+        const status = await fetchResearchRun(runId);
+        applyRunSnapshot(status);
+        if (status.status === "complete" || status.status === "error") {
+          stopPolling();
+        }
+      } catch {
+        // Transient poll failure; keep trying — live events still flow.
+      }
+    }, POLL_INTERVAL_MS);
   }
 
   return (

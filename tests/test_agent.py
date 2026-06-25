@@ -185,6 +185,40 @@ class DeepResearchAgentTests(unittest.TestCase):
         task = next(task for task in tasks if task.task_id == result["task_id"])
         self.assertEqual(task.status, "complete")
 
+    def test_start_research_is_pollable_in_background(self) -> None:
+        event_bus = RecordingEventBus()
+        manager = _permission_manager()
+        agent, _research, _memory, tmp = _build_agent(manager, event_bus)
+        try:
+            async def scenario():
+                snapshot = agent.start_research("topic", "tester")
+                self.assertEqual(snapshot["status"], "running")
+                run_id = snapshot["run_id"]
+                for _ in range(200):
+                    run = agent.get_run(run_id)
+                    if run["status"] != "running":
+                        return run
+                    await asyncio.sleep(0.005)
+                return agent.get_run(run_id)
+
+            run = asyncio.run(scenario())
+        finally:
+            tmp.cleanup()
+
+        self.assertEqual(run["status"], "complete")
+        self.assertIn("Grounded report", run["report"])
+        self.assertEqual(len(run["sources"]), 2)
+        self.assertTrue(run["steps"])
+
+    def test_get_run_unknown_returns_none(self) -> None:
+        event_bus = RecordingEventBus()
+        manager = _permission_manager()
+        agent, _research, _memory, tmp = _build_agent(manager, event_bus)
+        try:
+            self.assertIsNone(agent.get_run("nope"))
+        finally:
+            tmp.cleanup()
+
     def test_empty_goal_rejected(self) -> None:
         event_bus = RecordingEventBus()
         manager = _permission_manager()
