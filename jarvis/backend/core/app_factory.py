@@ -10,6 +10,7 @@ from pathlib import Path
 
 from jarvis.backend.bots.code_bot import CodeBot
 from jarvis.backend.core.agent_manager import DeepResearchAgent
+from jarvis.backend.bots.desktop_bot import DesktopBot
 from jarvis.backend.bots.file_bot import FileBot
 from jarvis.backend.bots.image_bot import ImageBot
 from jarvis.backend.bots.research_bot import ResearchBot
@@ -365,6 +366,7 @@ def get_core() -> JarvisCore:
     bot_manager.register(CodeBot(permission_manager, audit_logger))
     bot_manager.register(SystemBot(permission_manager, audit_logger))
     bot_manager.register(ImageBot(permission_manager, audit_logger, get_image_manager()))
+    bot_manager.register(DesktopBot(permission_manager, audit_logger))
 
     if os.environ.get("JARVIS_LLM_PROVIDER") == "echo":
         local_provider: EchoLMProvider | OllamaProvider = EchoLMProvider()

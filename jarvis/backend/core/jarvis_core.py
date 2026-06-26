@@ -49,24 +49,30 @@ class JarvisCore:
         user_message = self.memory.add_message(convo.convo_id, "user", normalized)
         self._publish_chat_message(user_message.role, user_message.content, convo.convo_id)
 
-        bot_name, bot_reply, bot_image_url = await self._maybe_dispatch_bot(normalized)
         image_url = None
-        if bot_reply is not None:
-            reply = bot_reply
-            image_url = bot_image_url
+        fact_reply = self._maybe_handle_fact(normalized, user.user_id)
+        if fact_reply is not None:
+            bot_name, reply = "memory", fact_reply
         else:
-            context = self.memory.memory_block_context() + self.memory.query_context(
-                user.user_id, normalized, limit=5
-            )
-            history = self._conversation_history(convo.convo_id)
-            if self._truthfulness_check_enabled():
-                reply = await self._generate_verified(
-                    normalized, context, history, convo.convo_id, metadata or {}
-                )
+            bot_name, bot_reply, bot_image_url = await self._maybe_dispatch_bot(normalized)
+            if bot_reply is not None:
+                reply = bot_reply
+                image_url = bot_image_url
             else:
-                reply = await self._generate_streaming(
-                    normalized, context, history, convo.convo_id, metadata or {}
+                context = (
+                    self.memory.memory_block_context()
+                    + self.memory.fact_context(user.user_id)
+                    + self.memory.query_context(user.user_id, normalized, limit=5)
                 )
+                history = self._conversation_history(convo.convo_id)
+                if self._truthfulness_check_enabled():
+                    reply = await self._generate_verified(
+                        normalized, context, history, convo.convo_id, metadata or {}
+                    )
+                else:
+                    reply = await self._generate_streaming(
+                        normalized, context, history, convo.convo_id, metadata or {}
+                    )
 
         assistant_message = self.memory.add_message(convo.convo_id, "assistant", reply)
         self._publish_chat_message(assistant_message.role, assistant_message.content, convo.convo_id)
@@ -212,6 +218,39 @@ class JarvisCore:
                 "content": content,
             },
         )
+
+    def _maybe_handle_fact(self, message: str, user_id: int) -> str | None:
+        """Handle the /fact and /facts commands for temporal-fact memory.
+
+        - ``/fact subject | predicate | object`` records a fact, superseding the
+          prior value so a changed employer/location stops being asserted.
+        - ``/facts`` (optionally ``/facts <subject>``) lists what is true now.
+
+        Returns the reply text, or None if the message is not a fact command.
+        """
+        stripped = message.strip()
+        lowered = stripped.lower()
+        if lowered == "/facts" or lowered.startswith("/facts "):
+            subject = stripped[len("/facts") :].strip() or None
+            facts = self.memory.current_facts(user_id, subject=subject)
+            if not facts:
+                scope = f" about {subject}" if subject else ""
+                return f"I have no current facts recorded{scope}."
+            lines = "\n".join(
+                f"- {fact.subject} {fact.predicate.replace('_', ' ')} {fact.object}"
+                for fact in facts
+            )
+            return f"Current facts:\n{lines}"
+        if lowered.startswith("/fact "):
+            parts = [piece.strip() for piece in stripped[len("/fact ") :].split("|")]
+            if len(parts) != 3 or not all(parts):
+                return "To record a fact, use: /fact subject | predicate | object"
+            subject, predicate, obj = parts
+            fact = self.memory.record_fact(
+                user_id, subject, predicate.replace(" ", "_"), obj, source="chat"
+            )
+            return f"Recorded: {fact.subject} {fact.predicate.replace('_', ' ')} {fact.object}."
+        return None
 
     async def _maybe_dispatch_bot(
         self, message: str

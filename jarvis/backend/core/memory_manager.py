@@ -127,6 +127,37 @@ class DocumentRecord:
         }
 
 
+@dataclass(slots=True)
+class FactRecord:
+    fact_id: int
+    user_id: int
+    subject: str
+    predicate: str
+    object: str
+    valid_from: datetime
+    valid_to: datetime | None
+    source: str | None
+    created_at: datetime
+
+    @property
+    def is_current(self) -> bool:
+        return self.valid_to is None
+
+    def to_api(self) -> dict[str, Any]:
+        return {
+            "fact_id": self.fact_id,
+            "user_id": self.user_id,
+            "subject": self.subject,
+            "predicate": self.predicate,
+            "object": self.object,
+            "valid_from": self.valid_from,
+            "valid_to": self.valid_to,
+            "source": self.source,
+            "created_at": self.created_at,
+            "is_current": self.is_current,
+        }
+
+
 class TTLCache:
     def __init__(self, ttl_seconds: int = 300, max_size: int = 256) -> None:
         self.ttl_seconds = ttl_seconds
@@ -441,6 +472,100 @@ class MemoryManager:
         if blocks.get("human"):
             context.append(f"[About the user] {blocks['human']}")
         return context
+
+    def record_fact(
+        self,
+        user_id: int,
+        subject: str,
+        predicate: str,
+        obj: str,
+        source: str | None = None,
+        supersede: bool = True,
+    ) -> FactRecord:
+        """Record a temporal fact, superseding the prior value by default.
+
+        With ``supersede`` (the default), any currently-true fact for the same
+        subject+predicate is closed off (``valid_to`` set to now) so only the
+        new value is asserted as current — this is what keeps a changed employer
+        or location from lingering as a stale "truth". Pass ``supersede=False``
+        for genuinely multi-valued predicates (e.g. "likes") that accumulate.
+        Recording a value that is already current is a no-op.
+        """
+        subject_c = subject.strip()
+        predicate_c = predicate.strip()
+        object_c = obj.strip()
+        if not subject_c or not predicate_c or not object_c:
+            raise ValueError("subject, predicate, and object are required")
+        with self._connect() as conn:
+            open_rows = conn.execute(
+                "SELECT fact_id, object FROM facts"
+                " WHERE user_id = ? AND subject = ? AND predicate = ? AND valid_to IS NULL",
+                (user_id, subject_c, predicate_c),
+            ).fetchall()
+            for row in open_rows:
+                if row["object"] == object_c:
+                    existing = conn.execute(
+                        "SELECT * FROM facts WHERE fact_id = ?", (row["fact_id"],)
+                    ).fetchone()
+                    return self._fact_from_row(existing)
+            if supersede:
+                conn.execute(
+                    "UPDATE facts SET valid_to = CURRENT_TIMESTAMP"
+                    " WHERE user_id = ? AND subject = ? AND predicate = ? AND valid_to IS NULL",
+                    (user_id, subject_c, predicate_c),
+                )
+            cursor = conn.execute(
+                "INSERT INTO facts(user_id, subject, predicate, object, source)"
+                " VALUES (?, ?, ?, ?, ?)",
+                (user_id, subject_c, predicate_c, object_c, source),
+            )
+            row = conn.execute(
+                "SELECT * FROM facts WHERE fact_id = ?", (cursor.lastrowid,)
+            ).fetchone()
+        return self._fact_from_row(row)
+
+    def current_facts(self, user_id: int, subject: str | None = None) -> list[FactRecord]:
+        """Facts that are true right now (valid_to IS NULL), newest-superseding."""
+        query = (
+            "SELECT * FROM facts WHERE user_id = ? AND valid_to IS NULL{subject}"
+            " ORDER BY subject, predicate, fact_id"
+        )
+        params: tuple[Any, ...] = (user_id,)
+        if subject is not None:
+            query = query.format(subject=" AND subject = ?")
+            params = (user_id, subject.strip())
+        else:
+            query = query.format(subject="")
+        with self._connect() as conn:
+            rows = conn.execute(query, params).fetchall()
+        return [self._fact_from_row(row) for row in rows]
+
+    def fact_history(self, user_id: int, subject: str, predicate: str) -> list[FactRecord]:
+        """Every value this subject+predicate has held, oldest first."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM facts WHERE user_id = ? AND subject = ? AND predicate = ?"
+                " ORDER BY valid_from, fact_id",
+                (user_id, subject.strip(), predicate.strip()),
+            ).fetchall()
+        return [self._fact_from_row(row) for row in rows]
+
+    def retract_fact(self, user_id: int, subject: str, predicate: str) -> int:
+        """Mark a fact no longer true without a replacement. Returns rows closed."""
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "UPDATE facts SET valid_to = CURRENT_TIMESTAMP"
+                " WHERE user_id = ? AND subject = ? AND predicate = ? AND valid_to IS NULL",
+                (user_id, subject.strip(), predicate.strip()),
+            )
+            return cursor.rowcount
+
+    def fact_context(self, user_id: int) -> list[str]:
+        """Current facts as grounded context lines for the system prompt."""
+        return [
+            f"[Current fact] {fact.subject} {fact.predicate.replace('_', ' ')} {fact.object}"
+            for fact in self.current_facts(user_id)
+        ]
 
     def create_task(self, user_id: int, name: str, description: str | None = None) -> TaskRecord:
         if not name.strip():
@@ -787,6 +912,20 @@ class MemoryManager:
             user_id=row["user_id"],
             username=row["username"],
             display_name=row["display_name"],
+            created_at=cls._parse_datetime(row["created_at"]),
+        )
+
+    @classmethod
+    def _fact_from_row(cls, row: sqlite3.Row) -> FactRecord:
+        return FactRecord(
+            fact_id=row["fact_id"],
+            user_id=row["user_id"],
+            subject=row["subject"],
+            predicate=row["predicate"],
+            object=row["object"],
+            valid_from=cls._parse_datetime(row["valid_from"]),
+            valid_to=cls._parse_datetime(row["valid_to"]) if row["valid_to"] else None,
+            source=row["source"],
             created_at=cls._parse_datetime(row["created_at"]),
         )
 

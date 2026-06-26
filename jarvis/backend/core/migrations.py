@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Callable
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 def _migration_1(connection: sqlite3.Connection) -> None:
@@ -87,9 +87,34 @@ def _migration_2(connection: sqlite3.Connection) -> None:
     )
 
 
+def _migration_3(connection: sqlite3.Connection) -> None:
+    # Temporal facts: subject-predicate-object triples with validity bounds so a
+    # superseded fact (e.g. an old employer) is kept as history but stops being
+    # asserted as current. A row is "currently true" when valid_to IS NULL.
+    connection.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS facts (
+          fact_id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL,
+          subject TEXT NOT NULL,
+          predicate TEXT NOT NULL,
+          object TEXT NOT NULL,
+          valid_from DATETIME DEFAULT CURRENT_TIMESTAMP,
+          valid_to DATETIME,
+          source TEXT,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY(user_id) REFERENCES users(user_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_facts_current
+          ON facts(user_id, subject, predicate, valid_to);
+        """
+    )
+
+
 MIGRATIONS: tuple[tuple[int, Callable[[sqlite3.Connection], None]], ...] = (
     (1, _migration_1),
     (2, _migration_2),
+    (3, _migration_3),
 )
 
 

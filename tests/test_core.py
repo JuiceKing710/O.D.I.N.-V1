@@ -15,6 +15,7 @@ from unittest.mock import patch
 
 from jarvis.backend.bots.base import Bot, BotRequest, BotResponse
 from jarvis.backend.bots.code_bot import CodeBot
+from jarvis.backend.bots.desktop_bot import DesktopBot
 from jarvis.backend.bots.file_bot import FileBot
 from jarvis.backend.bots.research_bot import ResearchBot
 from jarvis.backend.bots.system_bot import SystemBot
@@ -465,6 +466,146 @@ class CoreTests(unittest.TestCase):
         )
         self.assertIsNone(response)
 
+    def test_record_fact_supersedes_prior_value(self) -> None:
+        user = self.memory.get_or_create_user("zeb")
+        self.memory.record_fact(user.user_id, "Zeb", "works_at", "OldCo")
+        self.memory.record_fact(user.user_id, "Zeb", "works_at", "Razzolink")
+
+        current = self.memory.current_facts(user.user_id)
+        self.assertEqual([fact.object for fact in current], ["Razzolink"])
+        self.assertTrue(current[0].is_current)
+
+        history = self.memory.fact_history(user.user_id, "Zeb", "works_at")
+        self.assertEqual([fact.object for fact in history], ["OldCo", "Razzolink"])
+        self.assertIsNotNone(history[0].valid_to)  # the old employer is closed off
+        self.assertIsNone(history[1].valid_to)  # the new one is current
+
+    def test_record_fact_is_idempotent_for_same_value(self) -> None:
+        user = self.memory.get_or_create_user("zeb")
+        first = self.memory.record_fact(user.user_id, "Zeb", "lives_in", "Montana")
+        second = self.memory.record_fact(user.user_id, "Zeb", "lives_in", "Montana")
+        self.assertEqual(first.fact_id, second.fact_id)
+        self.assertEqual(len(self.memory.current_facts(user.user_id)), 1)
+
+    def test_record_fact_supersede_false_accumulates(self) -> None:
+        user = self.memory.get_or_create_user("zeb")
+        self.memory.record_fact(user.user_id, "Zeb", "likes", "pizza", supersede=False)
+        self.memory.record_fact(user.user_id, "Zeb", "likes", "tacos", supersede=False)
+        objects = sorted(fact.object for fact in self.memory.current_facts(user.user_id))
+        self.assertEqual(objects, ["pizza", "tacos"])
+
+    def test_fact_context_renders_current_facts(self) -> None:
+        user = self.memory.get_or_create_user("zeb")
+        self.memory.record_fact(user.user_id, "Zeb", "works_at", "Razzolink")
+        self.assertEqual(
+            self.memory.fact_context(user.user_id),
+            ["[Current fact] Zeb works at Razzolink"],
+        )
+
+    def test_fact_command_records_and_supersedes_via_chat(self) -> None:
+        asyncio.run(self.core.handle_message("/fact Zeb | works at | OldCo", "zeb"))
+        result = asyncio.run(self.core.handle_message("/fact Zeb | works at | Razzolink", "zeb"))
+        self.assertEqual(result["bot"], "memory")
+        self.assertIn("Razzolink", result["reply"])
+
+        user = self.memory.get_or_create_user("zeb")
+        self.assertEqual(
+            [fact.object for fact in self.memory.current_facts(user.user_id)],
+            ["Razzolink"],
+        )
+
+    def _desktop_bot(
+        self, decision=PermissionDecision.ALLOWED, proc=None, captured=None
+    ) -> DesktopBot:
+        perms = PermissionManager(
+            {"control_desktop": Permission("control_desktop", "control desktop", decision)}
+        )
+        proc = proc or SimpleNamespace(returncode=0, stdout="Safari", stderr="")
+
+        def runner(command):
+            if captured is not None:
+                captured.append(command)
+            return proc
+
+        return DesktopBot(perms, self.audit, runner=runner)
+
+    def test_desktop_bot_activate_passes_app_as_argv_not_interpolated(self) -> None:
+        captured: list = []
+        bot = self._desktop_bot(captured=captured)
+        hostile = 'Safari" to quit'  # an injection attempt
+        response = asyncio.run(
+            bot.on_request(
+                BotRequest(
+                    sender="test",
+                    action="activate",
+                    payload={"text": hostile},
+                    correlation_id="1",
+                )
+            )
+        )
+        self.assertTrue(response.ok)
+        command = captured[0]
+        # The script references argv; the hostile value is an isolated argv item
+        # after "--", never spliced into the AppleScript body.
+        self.assertIn("tell application (item 1 of argv) to activate", command)
+        self.assertEqual(command[command.index("--") + 1 :], [hostile])
+
+    def test_desktop_bot_state_reads_frontmost_app(self) -> None:
+        captured: list = []
+        bot = self._desktop_bot(
+            proc=SimpleNamespace(returncode=0, stdout="Finder", stderr=""), captured=captured
+        )
+        response = asyncio.run(
+            bot.on_request(
+                BotRequest(sender="test", action="state", payload={}, correlation_id="1")
+            )
+        )
+        self.assertTrue(response.ok)
+        self.assertEqual(response.payload["text"], "Finder")
+        self.assertNotIn("--", captured[0])  # no args means no argv separator
+
+    def test_desktop_bot_requires_permission(self) -> None:
+        bot = self._desktop_bot(decision=PermissionDecision.PROMPT)
+        response = asyncio.run(
+            bot.on_request(
+                BotRequest(
+                    sender="test",
+                    action="activate",
+                    payload={"text": "Safari"},
+                    correlation_id="1",
+                )
+            )
+        )
+        self.assertFalse(response.ok)
+        self.assertIn("permission_request", response.payload)
+
+    def test_desktop_bot_surfaces_osascript_failure(self) -> None:
+        bot = self._desktop_bot(
+            proc=SimpleNamespace(returncode=1, stdout="", stderr="App not found")
+        )
+        response = asyncio.run(
+            bot.on_request(
+                BotRequest(
+                    sender="test",
+                    action="activate",
+                    payload={"text": "Nope"},
+                    correlation_id="1",
+                )
+            )
+        )
+        self.assertFalse(response.ok)
+        self.assertIn("App not found", response.error)
+
+    def test_desktop_bot_rejects_unknown_action(self) -> None:
+        bot = self._desktop_bot()
+        response = asyncio.run(
+            bot.on_request(
+                BotRequest(sender="test", action="explode", payload={}, correlation_id="1")
+            )
+        )
+        self.assertFalse(response.ok)
+        self.assertIn("Unsupported desktop action", response.error)
+
     def test_permission_defaults_are_enforced(self) -> None:
         with self.assertRaises(PermissionError):
             self.permissions.require_allowed("execute_scripts")
@@ -536,7 +677,7 @@ class CoreTests(unittest.TestCase):
         with sqlite3.connect(self.memory.db_path) as connection:
             version = connection.execute("PRAGMA user_version").fetchone()[0]
 
-        self.assertEqual(version, 2)
+        self.assertEqual(version, 3)
 
     def test_full_backup_bundle_restores_settings_audit_and_vector_files(self) -> None:
         base = Path(self.tmp.name) / "bundle"

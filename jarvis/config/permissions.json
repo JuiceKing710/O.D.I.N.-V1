@@ -24,6 +24,11 @@
       "name": "generate_images",
       "description": "Generate images from text prompts.",
       "default": "prompt"
+    },
+    {
+      "name": "control_desktop",
+      "description": "Control native macOS apps (activate, type, click menus).",
+      "default": "prompt"
     }
   ]
 }
