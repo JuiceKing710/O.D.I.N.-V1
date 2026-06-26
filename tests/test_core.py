@@ -275,6 +275,82 @@ class CoreTests(unittest.TestCase):
         self.assertFalse(approved.payload["self_file"])
         self.assertEqual(target.read_text(encoding="utf-8"), "approved\n")
 
+    def test_file_bot_write_then_restore_reverts_self_file(self) -> None:
+        from jarvis.backend.core.file_snapshot import FileSnapshotStore
+
+        self_root = Path(self.tmp.name) / "jarvis-self"
+        target = self_root / "config.txt"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("original\n", encoding="utf-8")
+        store = FileSnapshotStore(Path(self.tmp.name) / "snaps")
+        bot = FileBot(self.permissions, self.audit, self_root=self_root, snapshot_store=store)
+
+        write = asyncio.run(
+            bot.on_request(
+                BotRequest(
+                    sender="test",
+                    action="write",
+                    payload={"path": str(target), "content": "edited\n"},
+                    correlation_id="1",
+                )
+            )
+        )
+        self.assertTrue(write.ok)
+        self.assertTrue(write.payload["undoable"])
+        self.assertEqual(target.read_text(encoding="utf-8"), "edited\n")
+
+        restore = asyncio.run(
+            bot.on_request(
+                BotRequest(
+                    sender="test",
+                    action="restore",
+                    payload={"text": str(target)},
+                    correlation_id="2",
+                )
+            )
+        )
+        self.assertTrue(restore.ok)
+        self.assertEqual(target.read_text(encoding="utf-8"), "original\n")
+
+    def test_file_bot_restore_without_store_is_disabled(self) -> None:
+        bot = FileBot(self.permissions, self.audit, self_root=Path(self.tmp.name))
+        response = asyncio.run(
+            bot.on_request(
+                BotRequest(
+                    sender="test",
+                    action="restore",
+                    payload={"text": str(Path(self.tmp.name) / "whatever.txt")},
+                    correlation_id="1",
+                )
+            )
+        )
+        self.assertFalse(response.ok)
+        self.assertIn("not enabled", response.error)
+
+    def test_file_snapshot_store_undo_of_created_file_deletes_it(self) -> None:
+        from jarvis.backend.core.file_snapshot import FileSnapshotStore
+
+        store = FileSnapshotStore(Path(self.tmp.name) / "snaps")
+        created = Path(self.tmp.name) / "new.txt"
+        # Snapshotting a not-yet-existing path records it as absent.
+        self.assertIsNotNone(store.snapshot(created))
+        created.write_text("brand new\n", encoding="utf-8")
+
+        self.assertTrue(store.restore(created))
+        self.assertFalse(created.exists())
+        # Nothing left to undo on a second call.
+        self.assertFalse(store.restore(created))
+
+    def test_file_snapshot_store_prunes_to_cap(self) -> None:
+        from jarvis.backend.core.file_snapshot import FileSnapshotStore
+
+        store = FileSnapshotStore(Path(self.tmp.name) / "snaps", max_snapshots=3)
+        target = Path(self.tmp.name) / "rolling.txt"
+        for index in range(6):
+            target.write_text(f"v{index}\n", encoding="utf-8")
+            store.snapshot(target)
+        self.assertEqual(len(store.history(target)), 3)
+
     def test_research_bot_returns_network_results(self) -> None:
         self.permissions.update_decisions({"access_network": "allowed"})
         bot = ResearchBot(self.permissions, self.audit)
@@ -1120,6 +1196,28 @@ class CoreTests(unittest.TestCase):
         health = store.health()
         self.assertEqual(health["provider"], "sqlite-local")
         self.assertEqual(health["collections"], {"messages": 2})
+
+    def test_sqlite_vector_store_caches_repeated_query_embeddings(self) -> None:
+        from jarvis.backend.core.vector_store import SqliteVectorStore
+
+        calls = {"count": 0}
+
+        def counting_embedder(text: str) -> list[float]:
+            calls["count"] += 1
+            return [float(len(text)), 1.0, 0.0]
+
+        store = SqliteVectorStore(
+            Path(self.tmp.name) / "vectors.db", embedder=counting_embedder
+        )
+        store.upsert_message(1, "the user likes motorcycles", {"convo": 1})
+        baseline = calls["count"]
+
+        # A single chat turn queries both the "messages" and "documents"
+        # collections with the identical text; the embedding must be computed
+        # once and reused, not recomputed per collection.
+        store.query("messages", "same query text", limit=3)
+        store.query("documents", "same query text", limit=3)
+        self.assertEqual(calls["count"] - baseline, 1)
 
     def test_sqlite_vector_store_degrades_gracefully_without_embedder(self) -> None:
         from jarvis.backend.core.vector_store import SqliteVectorStore

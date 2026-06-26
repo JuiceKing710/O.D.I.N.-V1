@@ -9,6 +9,7 @@ import urllib.error
 import urllib.request
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable
 
@@ -143,6 +144,23 @@ def _cosine_similarity(left: list[float], right: list[float]) -> float:
     return dot / (norm_left * norm_right)
 
 
+def _cosine_similarity_prenorm(
+    left: list[float], left_norm: float, right: list[float]
+) -> float:
+    """Cosine similarity when the left vector's norm is already known.
+
+    Used in the query scan so the query vector's norm is computed once rather
+    than once per stored record.
+    """
+    if len(left) != len(right) or not left or left_norm == 0.0:
+        return 0.0
+    dot = sum(a * b for a, b in zip(left, right))
+    norm_right = math.sqrt(sum(b * b for b in right))
+    if norm_right == 0.0:
+        return 0.0
+    return dot / (left_norm * norm_right)
+
+
 class SqliteVectorStore(VectorStoreInterface):
     """Semantic memory stored in SQLite with local embeddings — no external services
     beyond the Ollama embedding model, and covered by the existing encrypted backups."""
@@ -156,6 +174,11 @@ class SqliteVectorStore(VectorStoreInterface):
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.embedder = embedder or OllamaEmbedder()
+        # One chat turn embeds the same text up to three times (storing the user
+        # message, then querying the "messages" and "documents" collections with
+        # the identical query). Embeddings are deterministic per model, so a small
+        # bounded cache collapses those repeats into a single network call.
+        self._embed = lru_cache(maxsize=128)(self.embedder)
         self._lock = db_lock or threading.RLock()
         self.last_error: str | None = None
         with self._connect() as conn:
@@ -199,10 +222,15 @@ class SqliteVectorStore(VectorStoreInterface):
         if not text.strip():
             return []
         try:
-            query_vector = self.embedder(text)
+            query_vector = self._embed(text)
             self.last_error = None
         except RuntimeError as exc:
             self.last_error = str(exc)
+            return []
+        # The query vector's norm is constant across every stored row, so compute
+        # it once instead of recomputing it inside _cosine_similarity per record.
+        query_norm = math.sqrt(sum(value * value for value in query_vector))
+        if query_norm == 0.0:
             return []
         with self._lock, self._connect() as conn:
             rows = conn.execute(
@@ -212,7 +240,7 @@ class SqliteVectorStore(VectorStoreInterface):
             ).fetchall()
         scored = []
         for record_id, content, metadata, blob in rows:
-            score = _cosine_similarity(query_vector, _unpack_vector(blob))
+            score = _cosine_similarity_prenorm(query_vector, query_norm, _unpack_vector(blob))
             scored.append(
                 VectorSearchResult(
                     record_id=record_id,
@@ -254,7 +282,7 @@ class SqliteVectorStore(VectorStoreInterface):
         if not cleaned:
             return None
         try:
-            vector = self.embedder(cleaned)
+            vector = self._embed(cleaned)
             self.last_error = None
         except RuntimeError as exc:
             self.last_error = str(exc)

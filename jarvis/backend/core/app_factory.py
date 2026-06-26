@@ -17,6 +17,7 @@ from jarvis.backend.bots.system_bot import SystemBot
 from jarvis.backend.core.backup_scheduler import BackupScheduler
 from jarvis.backend.core.bot_manager import BotManager
 from jarvis.backend.core.event_bus import EventBus
+from jarvis.backend.core.file_snapshot import FileSnapshotStore
 from jarvis.backend.core.jarvis_core import JarvisCore
 from jarvis.backend.core.lm_provider import EchoLMProvider, OllamaProvider, TurboSwitchProvider
 from jarvis.backend.core.memory_consolidator import MemoryConsolidator
@@ -355,6 +356,9 @@ def get_core() -> JarvisCore:
             permission_manager,
             audit_logger,
             self_root=Path(os.environ.get("JARVIS_SELF_ROOT", PACKAGE_ROOT.parent)),
+            snapshot_store=FileSnapshotStore(
+                Path(os.environ.get("JARVIS_FILE_SNAPSHOT_DIR", "data/file_snapshots"))
+            ),
         )
     )
     bot_manager.register(ResearchBot(permission_manager, audit_logger))
