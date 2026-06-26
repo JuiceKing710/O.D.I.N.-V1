@@ -902,7 +902,7 @@ class CoreTests(unittest.TestCase):
         )
 
         self.assertEqual(messages[0]["role"], "system")
-        self.assertIn("Your name is Odin", messages[0]["content"])
+        self.assertIn("say your name is Odin", messages[0]["content"])
         self.assertEqual(
             [(m["role"], m["content"]) for m in messages[1:]],
             [("user", "hello"), ("assistant", "hi there"), ("user", "and now?")],
@@ -918,7 +918,7 @@ class CoreTests(unittest.TestCase):
             ],
         )
 
-        self.assertIn("Your name is Odin", payload["system_instruction"]["parts"][0]["text"])
+        self.assertIn("say your name is Odin", payload["system_instruction"]["parts"][0]["text"])
         self.assertIn("a fact", payload["system_instruction"]["parts"][0]["text"])
         roles = [item["role"] for item in payload["contents"]]
         self.assertEqual(roles, ["user", "model", "user"])
@@ -1325,11 +1325,15 @@ class CoreTests(unittest.TestCase):
         self.assertIn("I don't know", SYSTEM_PROMPT)
         self.assertIn("Never invent", SYSTEM_PROMPT)
         # The honesty contract must keep the identity line existing tests rely on.
-        self.assertIn("Your name is Odin", SYSTEM_PROMPT)
-        # Explicit guards for the two real failure modes: false perception
-        # ("I saw you on camera") and false capability ("I upgraded myself").
-        self.assertIn("Never claim to see", SYSTEM_PROMPT)
+        self.assertIn("say your name is Odin", SYSTEM_PROMPT)
+        # Guard the false-perception failure mode ("I saw you on camera"): Odin
+        # must not claim to see without an actual image in the conversation.
+        self.assertIn("Do not claim to see", SYSTEM_PROMPT)
+        # Guard the false-action failure mode ("I upgraded myself") while still
+        # allowing Odin to acknowledge the capability — these two must coexist.
         self.assertIn("upgraded", SYSTEM_PROMPT)
+        self.assertIn("CAPABILITY vs. ACTION", SYSTEM_PROMPT)
+        self.assertIn("Do not deny a capability you are designed to have", SYSTEM_PROMPT)
 
     def test_every_provider_payload_carries_truthfulness_contract(self) -> None:
         # The contract must reach the model on every real provider, not just the
