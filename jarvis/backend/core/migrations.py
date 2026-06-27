@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Callable
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 
 def _migration_1(connection: sqlite3.Connection) -> None:
@@ -146,12 +146,37 @@ def _migration_5(connection: sqlite3.Connection) -> None:
     )
 
 
+def _migration_6(connection: sqlite3.Connection) -> None:
+    # Controlled adaptive improvement (master spec §8): Odin proposes changes to
+    # its own settings or memory blocks, but nothing is applied without an
+    # explicit human approve -> apply. ``current_value`` is the captured prior
+    # value, which makes every applied change reversible.
+    connection.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS improvement_proposals (
+          proposal_id INTEGER PRIMARY KEY AUTOINCREMENT,
+          kind TEXT CHECK(kind IN ('setting','memory')) NOT NULL,
+          target TEXT NOT NULL,
+          current_value TEXT,
+          proposed_value TEXT NOT NULL,
+          rationale TEXT,
+          status TEXT CHECK(status IN
+            ('pending','approved','rejected','applied','reverted')) NOT NULL DEFAULT 'pending',
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          decided_at DATETIME
+        );
+        CREATE INDEX IF NOT EXISTS idx_proposals_status ON improvement_proposals(status);
+        """
+    )
+
+
 MIGRATIONS: tuple[tuple[int, Callable[[sqlite3.Connection], None]], ...] = (
     (1, _migration_1),
     (2, _migration_2),
     (3, _migration_3),
     (4, _migration_4),
     (5, _migration_5),
+    (6, _migration_6),
 )
 
 

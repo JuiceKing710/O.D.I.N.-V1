@@ -31,6 +31,7 @@ from jarvis.backend.core.app_factory import (
     get_event_bus,
     get_heartbeat_engine,
     get_image_manager,
+    get_improvement_manager,
     get_permission_manager,
     get_recovery_manager,
     get_safety_switch,
@@ -53,6 +54,7 @@ from jarvis.backend.core.settings_store import SettingsStore
 from jarvis.backend.core.safety_switch import SafetySwitch
 from jarvis.backend.core.heartbeat import HeartbeatEngine
 from jarvis.backend.core.identity_manager import IdentityManager
+from jarvis.backend.core.improvement_manager import ImprovementManager
 from jarvis.backend.core.memory_consolidator import MemoryConsolidator
 from jarvis.backend.core.vector_store import NullVectorStore
 from jarvis.backend.core.vision_manager import VisionManager
@@ -188,6 +190,14 @@ class ApiTests(unittest.TestCase):
         app.dependency_overrides[get_core] = lambda: self.core
         app.dependency_overrides[get_safety_switch] = lambda: self.safety_switch
         app.dependency_overrides[get_heartbeat_engine] = lambda: self.heartbeat
+        self.improvements = ImprovementManager(
+            self.memory,
+            self.settings,
+            self.core.lm_provider,
+            safety_switch=self.safety_switch,
+            event_bus=self.event_bus,
+        )
+        app.dependency_overrides[get_improvement_manager] = lambda: self.improvements
         app.dependency_overrides[get_event_bus] = lambda: self.event_bus
         app.dependency_overrides[get_permission_manager] = lambda: self.permission_manager
         app.dependency_overrides[get_recovery_manager] = lambda: self.recovery
@@ -728,6 +738,48 @@ class ApiTests(unittest.TestCase):
     def test_update_unknown_goal_returns_404(self) -> None:
         response = self.client.patch("/api/v1/goals/999", json={"status": "done"})
         self.assertEqual(response.status_code, 404)
+
+    def test_improvement_propose_approve_apply_revert_flow(self) -> None:
+        created = self.client.post(
+            "/api/v1/improvements",
+            json={
+                "kind": "memory",
+                "target": "persona",
+                "proposed_value": "Odin: terse and kind.",
+                "rationale": "tighten the voice",
+            },
+        ).json()
+        self.assertEqual(created["status"], "pending")
+        pid = created["proposal_id"]
+
+        # Cannot apply before approval.
+        self.assertEqual(
+            self.client.post(f"/api/v1/improvements/{pid}/apply").status_code, 409
+        )
+
+        self.client.post(f"/api/v1/improvements/{pid}/approve")
+        applied = self.client.post(f"/api/v1/improvements/{pid}/apply").json()
+        self.assertEqual(applied["status"], "applied")
+        self.assertEqual(
+            self.client.get("/api/v1/memory/blocks").json()["blocks"]["persona"],
+            "Odin: terse and kind.",
+        )
+
+        reverted = self.client.post(f"/api/v1/improvements/{pid}/revert").json()
+        self.assertEqual(reverted["status"], "reverted")
+
+    def test_improvement_apply_blocked_while_halted(self) -> None:
+        created = self.client.post(
+            "/api/v1/improvements",
+            json={"kind": "memory", "target": "persona", "proposed_value": "x"},
+        ).json()
+        pid = created["proposal_id"]
+        self.client.post(f"/api/v1/improvements/{pid}/approve")
+        self.client.post("/api/v1/system/emergency-stop")
+        self.assertEqual(
+            self.client.post(f"/api/v1/improvements/{pid}/apply").status_code, 409
+        )
+        self.client.post("/api/v1/system/resume")
 
     def test_models_endpoint_reports_provider_status(self) -> None:
         self.core.lm_provider = StatusLMProvider()

@@ -108,6 +108,32 @@ class GoalRecord:
 
 
 @dataclass(slots=True)
+class ProposalRecord:
+    proposal_id: int
+    kind: Literal["setting", "memory"]
+    target: str
+    current_value: str | None
+    proposed_value: str
+    rationale: str | None
+    status: Literal["pending", "approved", "rejected", "applied", "reverted"]
+    created_at: datetime
+    decided_at: datetime | None
+
+    def to_api(self) -> dict[str, Any]:
+        return {
+            "proposal_id": self.proposal_id,
+            "kind": self.kind,
+            "target": self.target,
+            "current_value": self.current_value,
+            "proposed_value": self.proposed_value,
+            "rationale": self.rationale,
+            "status": self.status,
+            "created_at": self.created_at,
+            "decided_at": self.decided_at,
+        }
+
+
+@dataclass(slots=True)
 class ReflectionRecord:
     reflection_id: int
     convo_id: int
@@ -821,6 +847,85 @@ class MemoryManager:
             text=row["text"],
             status=row["status"],
             created_at=cls._parse_datetime(row["created_at"]),
+        )
+
+    # Adaptive improvement proposals (master spec §8).
+    def create_proposal(
+        self,
+        kind: str,
+        target: str,
+        proposed_value: str,
+        current_value: str | None = None,
+        rationale: str | None = None,
+    ) -> ProposalRecord:
+        if kind not in {"setting", "memory"}:
+            raise ValueError(f"Invalid proposal kind: {kind}")
+        if not target.strip() or not proposed_value.strip():
+            raise ValueError("target and proposed_value are required")
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "INSERT INTO improvement_proposals"
+                "(kind, target, current_value, proposed_value, rationale, status)"
+                " VALUES (?, ?, ?, ?, ?, 'pending')",
+                (kind, target.strip(), current_value, proposed_value, rationale),
+            )
+            row = conn.execute(
+                "SELECT * FROM improvement_proposals WHERE proposal_id = ?",
+                (cursor.lastrowid,),
+            ).fetchone()
+        return self._proposal_from_row(row)
+
+    def list_proposals(self, status: str | None = None) -> list[ProposalRecord]:
+        query = "SELECT * FROM improvement_proposals"
+        params: list[Any] = []
+        if status is not None:
+            query += " WHERE status = ?"
+            params.append(status)
+        query += " ORDER BY created_at DESC, proposal_id DESC"
+        with self._connect() as conn:
+            rows = conn.execute(query, params).fetchall()
+        return [self._proposal_from_row(row) for row in rows]
+
+    def get_proposal(self, proposal_id: int) -> ProposalRecord:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM improvement_proposals WHERE proposal_id = ?",
+                (proposal_id,),
+            ).fetchone()
+        if row is None:
+            raise ValueError(f"Proposal not found: {proposal_id}")
+        return self._proposal_from_row(row)
+
+    def set_proposal_status(self, proposal_id: int, status: str) -> ProposalRecord:
+        if status not in {"pending", "approved", "rejected", "applied", "reverted"}:
+            raise ValueError(f"Invalid proposal status: {status}")
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "UPDATE improvement_proposals"
+                " SET status = ?, decided_at = CURRENT_TIMESTAMP"
+                " WHERE proposal_id = ?",
+                (status, proposal_id),
+            )
+            if cursor.rowcount == 0:
+                raise ValueError(f"Proposal not found: {proposal_id}")
+            row = conn.execute(
+                "SELECT * FROM improvement_proposals WHERE proposal_id = ?",
+                (proposal_id,),
+            ).fetchone()
+        return self._proposal_from_row(row)
+
+    @classmethod
+    def _proposal_from_row(cls, row: sqlite3.Row) -> ProposalRecord:
+        return ProposalRecord(
+            proposal_id=row["proposal_id"],
+            kind=row["kind"],
+            target=row["target"],
+            current_value=row["current_value"],
+            proposed_value=row["proposed_value"],
+            rationale=row["rationale"],
+            status=row["status"],
+            created_at=cls._parse_datetime(row["created_at"]),
+            decided_at=cls._parse_datetime(row["decided_at"]) if row["decided_at"] else None,
         )
 
     def delete_conversation(self, user_id: int, convo_id: int) -> None:
