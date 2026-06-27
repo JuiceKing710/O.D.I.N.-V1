@@ -82,6 +82,20 @@ class EmergencyStopRequest(BaseModel):
     reason: str | None = None
 
 
+class IdentityResponse(BaseModel):
+    traits: list[str] = Field(default_factory=list)
+    narrative: str = ""
+    mood: str = ""
+    interests: list[str] = Field(default_factory=list)
+
+
+class IdentityUpdateRequest(BaseModel):
+    traits: list[str] | None = None
+    narrative: str | None = None
+    mood: str | None = None
+    interests: list[str] | None = None
+
+
 class MemoryBlocksResponse(BaseModel):
     blocks: dict[str, str]
 

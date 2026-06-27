@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 import threading
 import time
@@ -472,6 +473,69 @@ class MemoryManager:
         if blocks.get("human"):
             context.append(f"[About the user] {blocks['human']}")
         return context
+
+    # Identity persistence (master spec §4). Defaults match the SYSTEM_PROMPT
+    # voice so Odin reads consistently even before the heartbeat ever evolves
+    # them. List-valued keys (traits, interests) are stored as JSON text.
+    DEFAULT_IDENTITY: dict[str, Any] = {
+        "traits": ["steady", "warm but direct", "quietly confident"],
+        "narrative": "Settling in and ready to help.",
+        "mood": "steady",
+        "interests": [],
+    }
+    _IDENTITY_LIST_KEYS = ("traits", "interests")
+
+    def get_identity(self) -> dict[str, Any]:
+        with self._connect() as conn:
+            rows = conn.execute("SELECT key, value FROM identity_state").fetchall()
+        identity: dict[str, Any] = {
+            key: (list(value) if isinstance(value, list) else value)
+            for key, value in self.DEFAULT_IDENTITY.items()
+        }
+        for row in rows:
+            key = row["key"]
+            if key in self._IDENTITY_LIST_KEYS:
+                try:
+                    decoded = json.loads(row["value"])
+                except (json.JSONDecodeError, TypeError):
+                    decoded = []
+                identity[key] = decoded if isinstance(decoded, list) else []
+            else:
+                identity[key] = row["value"]
+        return identity
+
+    def update_identity(self, patch: dict[str, Any]) -> dict[str, Any]:
+        if not patch:
+            return self.get_identity()
+        with self._connect() as conn:
+            for key, value in patch.items():
+                if key in self._IDENTITY_LIST_KEYS:
+                    stored = json.dumps(list(value) if value is not None else [])
+                else:
+                    stored = "" if value is None else str(value)
+                conn.execute(
+                    "INSERT INTO identity_state(key, value, updated_at)"
+                    " VALUES (?, ?, CURRENT_TIMESTAMP)"
+                    " ON CONFLICT(key) DO UPDATE SET"
+                    " value = excluded.value, updated_at = CURRENT_TIMESTAMP",
+                    (key, stored),
+                )
+        return self.get_identity()
+
+    def identity_context(self) -> list[str]:
+        """Odin's current self-model as grounded context lines for the prompt."""
+        identity = self.get_identity()
+        parts: list[str] = []
+        narrative = str(identity.get("narrative") or "").strip()
+        if narrative:
+            parts.append(f"Currently: {narrative}")
+        mood = str(identity.get("mood") or "").strip()
+        if mood:
+            parts.append(f"Mood: {mood}")
+        traits = identity.get("traits") or []
+        if traits:
+            parts.append("Traits: " + ", ".join(str(trait) for trait in traits))
+        return [f"[Odin identity] {' '.join(parts)}"] if parts else []
 
     def record_fact(
         self,

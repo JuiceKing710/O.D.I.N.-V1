@@ -33,6 +33,7 @@ from jarvis.backend.core.lm_provider import (
     TurboSwitchProvider,
 )
 from jarvis.backend.core.memory_manager import MemoryManager
+from jarvis.backend.core.migrations import SCHEMA_VERSION
 from jarvis.backend.core.recovery_manager import RecoveryManager
 from jarvis.backend.core.vector_store import InMemoryVectorStore, NullVectorStore, VectorStoreInterface
 from jarvis.backend.core.voice_manager import (
@@ -677,7 +678,7 @@ class CoreTests(unittest.TestCase):
         with sqlite3.connect(self.memory.db_path) as connection:
             version = connection.execute("PRAGMA user_version").fetchone()[0]
 
-        self.assertEqual(version, 3)
+        self.assertEqual(version, SCHEMA_VERSION)
 
     def test_full_backup_bundle_restores_settings_audit_and_vector_files(self) -> None:
         base = Path(self.tmp.name) / "bundle"

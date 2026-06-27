@@ -27,6 +27,8 @@ from jarvis.backend.api.models import (
     DocumentResponse,
     EmergencyStopRequest,
     EventResponse,
+    IdentityResponse,
+    IdentityUpdateRequest,
     ImageGenerateRequest,
     ImageGenerateResponse,
     ImageStatusResponse,
@@ -73,6 +75,7 @@ from jarvis.backend.core.app_factory import (
     get_audit_logger,
     get_core,
     get_event_bus,
+    get_identity_manager,
     get_image_manager,
     get_permission_manager,
     get_recovery_manager,
@@ -92,6 +95,7 @@ from jarvis.backend.core.bot_manager import BotMessage
 from jarvis.backend.core.event_bus import EventBus
 from jarvis.backend.core.image_manager import ImageManager
 from jarvis.backend.core.jarvis_core import JarvisCore
+from jarvis.backend.core.identity_manager import IdentityManager
 from jarvis.backend.core.recovery_manager import RecoveryManager
 from jarvis.backend.core.safety_switch import SafetySwitch
 from jarvis.backend.core.settings_store import SettingsStore
@@ -257,6 +261,22 @@ def resume_from_stop(
     safety: SafetySwitch = Depends(get_safety_switch),
 ) -> SafetyStatusResponse:
     return SafetyStatusResponse(**safety.release())
+
+
+@router.get("/identity", response_model=IdentityResponse)
+def get_identity(
+    identity: IdentityManager = Depends(get_identity_manager),
+) -> IdentityResponse:
+    return IdentityResponse(**identity.get())
+
+
+@router.put("/identity", response_model=IdentityResponse)
+def update_identity(
+    request: IdentityUpdateRequest,
+    identity: IdentityManager = Depends(get_identity_manager),
+) -> IdentityResponse:
+    patch = request.model_dump(exclude_none=True)
+    return IdentityResponse(**identity.update(patch))
 
 
 @router.post("/chat", response_model=ChatResponse)

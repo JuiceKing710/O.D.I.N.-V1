@@ -21,6 +21,7 @@ from jarvis.backend.core.event_bus import EventBus
 from jarvis.backend.core.file_snapshot import FileSnapshotStore
 from jarvis.backend.core.jarvis_core import JarvisCore
 from jarvis.backend.core.lm_provider import EchoLMProvider, OllamaProvider, TurboSwitchProvider
+from jarvis.backend.core.identity_manager import IdentityManager
 from jarvis.backend.core.memory_consolidator import MemoryConsolidator
 from jarvis.backend.core.memory_manager import MemoryManager
 from jarvis.backend.core.recovery_manager import RecoveryManager
@@ -333,6 +334,11 @@ def get_image_manager() -> ImageManager:
         output_dir=Path(os.environ.get("JARVIS_IMAGE_OUTPUT_DIR", "data/images")),
         event_bus=get_event_bus(),
     )
+
+
+@lru_cache(maxsize=1)
+def get_identity_manager() -> IdentityManager:
+    return IdentityManager(get_core().memory, event_bus=get_event_bus())
 
 
 @lru_cache(maxsize=1)
