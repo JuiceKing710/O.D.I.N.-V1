@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+import re
 import shlex
 import shutil
 import subprocess
@@ -11,6 +13,33 @@ from pathlib import Path
 from typing import Protocol
 
 from jarvis.backend.core.event_bus import EventBus
+
+logger = logging.getLogger(__name__)
+
+# Real speech peaks around -3 dB; a silent/muted mic floors near -90 dB and a
+# quiet but speechless room sits around -60 dB. -45 dB cleanly separates them.
+SILENCE_MAX_DB = -45.0
+
+_MAX_VOLUME_RE = re.compile(r"max_volume:\s*(-?\d+(?:\.\d+)?)\s*dB")
+
+# Whisper hallucinates filler on silence: bracketed markers like "[BLANK_AUDIO]"
+# or "[ Silence ]", or a lone stray word. These are not speech and must never be
+# forwarded to the language model as if the user had said them.
+_BLANK_TRANSCRIPT_RE = re.compile(r"^[\[(][^\])]*[\])][.\s]*$")
+
+
+def _audio_peak_db(ffmpeg_stderr: str) -> float | None:
+    """Parse the peak volume (dB) from ffmpeg ``volumedetect`` stderr output.
+
+    Returns ``None`` when no measurement is present so callers can fail open
+    rather than wrongly reject audio they could not measure."""
+    match = _MAX_VOLUME_RE.search(ffmpeg_stderr or "")
+    return float(match.group(1)) if match else None
+
+
+def _is_blank_transcript(transcript: str) -> bool:
+    cleaned = transcript.strip()
+    return not cleaned or bool(_BLANK_TRANSCRIPT_RE.match(cleaned))
 
 
 class VoiceState(StrEnum):
@@ -113,6 +142,8 @@ class WhisperCliSpeechToTextAdapter:
                     "16000",
                     "-ac",
                     "1",
+                    "-af",
+                    "volumedetect",
                     str(wav_path),
                 ],
                 capture_output=True,
@@ -122,6 +153,19 @@ class WhisperCliSpeechToTextAdapter:
             )
             if converted.returncode != 0 or not wav_path.is_file():
                 raise RuntimeError(converted.stderr.strip() or "Audio conversion failed")
+            # Reject silence before transcription: a muted mic, denied OS
+            # permission, or the wrong input device records near-total silence,
+            # which Whisper "transcribes" into hallucinated filler. Catching it
+            # here gives the user a clear "no speech" error instead of letting a
+            # phantom phrase reach the language model.
+            peak_db = _audio_peak_db(converted.stderr)
+            logger.info("Audio peak volume: %s dB (silence gate %s dB)", peak_db, SILENCE_MAX_DB)
+            if peak_db is not None and peak_db < SILENCE_MAX_DB:
+                raise RuntimeError(
+                    "No speech detected — the microphone captured silence. "
+                    "Check that the right input device is selected and that "
+                    "O.D.I.N. has microphone access in System Settings."
+                )
             result = subprocess.run(
                 [
                     self.executable,
@@ -143,8 +187,10 @@ class WhisperCliSpeechToTextAdapter:
         if result.returncode != 0:
             raise RuntimeError(result.stderr.strip() or "Local Whisper transcription failed")
         transcript = result.stdout.strip()
-        if not transcript:
-            raise RuntimeError("Local Whisper transcription returned no text")
+        if _is_blank_transcript(transcript):
+            logger.info("Discarded blank/hallucinated transcript: %r", transcript)
+            raise RuntimeError("No speech detected in the audio")
+        logger.info("Transcribed %d chars of speech", len(transcript))
         return transcript
 
 

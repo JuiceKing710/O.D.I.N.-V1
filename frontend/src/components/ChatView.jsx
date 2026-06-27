@@ -434,6 +434,12 @@ export function ChatView({ onOpenCoreFocus }) {
         setVoiceState("thinking");
         try {
           const blob = new Blob(chunks, { type: recorder.mimeType });
+          console.debug(`[odin-voice] captured ${blob.size} bytes (${recorder.mimeType})`);
+          if (!blob.size) {
+            throw new Error(
+              "No audio was captured — the microphone may be muted or another app is using it.",
+            );
+          }
           if (blob.size > 15_000_000) {
             throw new Error("Backend microphone recording exceeds the 15 MB limit.");
           }
@@ -441,8 +447,13 @@ export function ChatView({ onOpenCoreFocus }) {
             audioBase64: await blobToBase64(blob),
             audioSuffix: recorder.mimeType.includes("webm") ? ".webm" : ".wav",
           });
-          setInput(response.transcript);
-          await sendMessage(response.transcript);
+          console.debug(`[odin-voice] transcript: ${JSON.stringify(response.transcript)}`);
+          const transcript = response.transcript?.trim();
+          if (!transcript) {
+            throw new Error("No speech detected — try speaking again.");
+          }
+          setInput(transcript);
+          await sendMessage(transcript);
         } catch (error) {
           if (!shouldRestart) {
             setVoiceNotice(error.message);
