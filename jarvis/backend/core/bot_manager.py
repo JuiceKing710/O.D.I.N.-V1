@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from jarvis.backend.bots.base import Bot, BotRequest, BotResponse
 from jarvis.backend.core.event_bus import EventBus
+from jarvis.backend.core.safety_switch import HIGH_IMPACT_BOTS, SafetySwitch
 from jarvis.backend.utils.audit_logging import AuditLogger
 from jarvis.backend.utils.permissions import PermissionManager
 
@@ -30,6 +31,7 @@ class BotManager:
         timeout_seconds: float = 10.0,
         retry_count: int = 1,
         acl: dict[str, set[str]] | None = None,
+        safety_switch: SafetySwitch | None = None,
     ) -> None:
         self.permission_manager = permission_manager
         self.audit_logger = audit_logger
@@ -37,6 +39,7 @@ class BotManager:
         self.timeout_seconds = timeout_seconds
         self.retry_count = retry_count
         self.acl = acl or {}
+        self.safety_switch = safety_switch
         self._bots: dict[str, Bot] = {}
 
     def register(self, bot: Bot) -> None:
@@ -67,6 +70,22 @@ class BotManager:
         bot = self._bots.get(message.recipient)
         if bot is None:
             return None
+        if (
+            self.safety_switch is not None
+            and message.recipient in HIGH_IMPACT_BOTS
+            and self.safety_switch.is_engaged()
+        ):
+            self.audit_logger.log(
+                actor=message.sender,
+                action=f"bot:{message.recipient}:{message.action}",
+                result="halted",
+                metadata={"correlation_id": message.correlation_id},
+            )
+            self._publish_status(message, "halted")
+            return BotResponse(
+                ok=False,
+                error="Odin is halted (emergency stop engaged). Resume to allow this action.",
+            )
         if not self._is_allowed(message.sender, message.recipient):
             self.audit_logger.log(
                 actor=message.sender,

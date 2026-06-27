@@ -15,6 +15,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # context before sending it (generate -> critique -> one corrective regen).
     # Off by default: it costs extra model calls and disables live streaming.
     "truthfulness_check": False,
+    # Emergency stop (master spec §Safety). When True, every high-impact bot
+    # action is refused and the heartbeat loop pauses until explicitly resumed.
+    "emergency_stop": False,
 }
 
 

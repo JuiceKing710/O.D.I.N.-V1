@@ -71,6 +71,17 @@ class SystemOverviewResponse(BaseModel):
     nodes: dict[str, dict[str, Any]]
 
 
+class SafetyStatusResponse(BaseModel):
+    engaged: bool
+    since: str | None = None
+    reason: str | None = None
+    blocked_bots: list[str] = Field(default_factory=list)
+
+
+class EmergencyStopRequest(BaseModel):
+    reason: str | None = None
+
+
 class MemoryBlocksResponse(BaseModel):
     blocks: dict[str, str]
 
