@@ -25,6 +25,7 @@ from jarvis.backend.api.models import (
     ConversationSummaryResponse,
     DeleteResponse,
     DocumentResponse,
+    EmergencyStopRequest,
     EventResponse,
     ImageGenerateRequest,
     ImageGenerateResponse,
@@ -43,6 +44,7 @@ from jarvis.backend.api.models import (
     PermissionResolveResponse,
     ResearchAgentRequest,
     ResearchRunResponse,
+    SafetyStatusResponse,
     SettingsResponse,
     SettingsUpdateRequest,
     StartupHealthResponse,
@@ -75,6 +77,7 @@ from jarvis.backend.core.app_factory import (
     get_permission_manager,
     get_recovery_manager,
     get_memory_consolidator,
+    get_safety_switch,
     get_settings_store,
     get_system_monitor,
     get_vision_manager,
@@ -90,6 +93,7 @@ from jarvis.backend.core.event_bus import EventBus
 from jarvis.backend.core.image_manager import ImageManager
 from jarvis.backend.core.jarvis_core import JarvisCore
 from jarvis.backend.core.recovery_manager import RecoveryManager
+from jarvis.backend.core.safety_switch import SafetySwitch
 from jarvis.backend.core.settings_store import SettingsStore
 from jarvis.backend.core.system_monitor import SystemMonitor
 from jarvis.backend.core.vision_manager import VisionManager
@@ -168,6 +172,7 @@ async def system_overview(
     monitor: SystemMonitor = Depends(get_system_monitor),
     permission_manager: PermissionManager = Depends(get_permission_manager),
     scheduler: BackupScheduler = Depends(get_backup_scheduler),
+    safety: SafetySwitch = Depends(get_safety_switch),
 ) -> SystemOverviewResponse:
     provider = await core.lm_provider.status()
     voice = voice_manager.status()
@@ -177,6 +182,7 @@ async def system_overview(
     documents = core.memory.list_documents(user.user_id)
     conversations = core.memory.list_conversations(user.user_id, limit=100)
     pending_approvals = permission_manager.pending_requests()
+    halted = safety.is_engaged()
     nodes = {
         "reasoning_engine": {
             "ok": provider.available,
@@ -203,9 +209,12 @@ async def system_overview(
             "configured": vision.configured,
         },
         "security_mesh": {
-            "ok": True,
-            "label": f"{len(pending_approvals)} pending approval(s)",
+            "ok": not halted,
+            "label": "HALTED — emergency stop"
+            if halted
+            else f"{len(pending_approvals)} pending approval(s)",
             "pending_approvals": len(pending_approvals),
+            "emergency_stop": halted,
         },
         "automation_hub": {
             "ok": True,
@@ -224,6 +233,30 @@ async def system_overview(
         },
     }
     return SystemOverviewResponse(metrics=monitor.snapshot(), nodes=nodes)
+
+
+@router.get("/system/safety", response_model=SafetyStatusResponse)
+def safety_status(
+    safety: SafetySwitch = Depends(get_safety_switch),
+) -> SafetyStatusResponse:
+    return SafetyStatusResponse(**safety.status())
+
+
+@router.post("/system/emergency-stop", response_model=SafetyStatusResponse)
+def emergency_stop(
+    request: EmergencyStopRequest = EmergencyStopRequest(),
+    safety: SafetySwitch = Depends(get_safety_switch),
+) -> SafetyStatusResponse:
+    # The body is optional so a bare POST (a panic button, a curl with no
+    # payload) still halts Odin instead of 422-ing.
+    return SafetyStatusResponse(**safety.engage(reason=request.reason))
+
+
+@router.post("/system/resume", response_model=SafetyStatusResponse)
+def resume_from_stop(
+    safety: SafetySwitch = Depends(get_safety_switch),
+) -> SafetyStatusResponse:
+    return SafetyStatusResponse(**safety.release())
 
 
 @router.post("/chat", response_model=ChatResponse)

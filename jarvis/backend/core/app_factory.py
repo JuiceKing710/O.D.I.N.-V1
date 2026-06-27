@@ -24,6 +24,7 @@ from jarvis.backend.core.lm_provider import EchoLMProvider, OllamaProvider, Turb
 from jarvis.backend.core.memory_consolidator import MemoryConsolidator
 from jarvis.backend.core.memory_manager import MemoryManager
 from jarvis.backend.core.recovery_manager import RecoveryManager
+from jarvis.backend.core.safety_switch import SafetySwitch
 from jarvis.backend.core.settings_store import SettingsStore
 from jarvis.backend.core.system_monitor import SystemMonitor
 from jarvis.backend.core.vector_store import (
@@ -165,6 +166,15 @@ def get_system_monitor() -> SystemMonitor:
 @lru_cache(maxsize=1)
 def get_audit_logger() -> AuditLogger:
     return AuditLogger(Path(os.environ.get("JARVIS_AUDIT_LOG", "data/audit.log")))
+
+
+@lru_cache(maxsize=1)
+def get_safety_switch() -> SafetySwitch:
+    return SafetySwitch(
+        get_settings_store(),
+        event_bus=get_event_bus(),
+        audit_logger=get_audit_logger(),
+    )
 
 
 @lru_cache(maxsize=1)
@@ -351,6 +361,7 @@ def get_core() -> JarvisCore:
         permission_manager=permission_manager,
         audit_logger=audit_logger,
         event_bus=event_bus,
+        safety_switch=get_safety_switch(),
     )
     bot_manager.register(
         FileBot(

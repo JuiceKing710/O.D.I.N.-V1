@@ -32,6 +32,7 @@ from jarvis.backend.core.app_factory import (
     get_image_manager,
     get_permission_manager,
     get_recovery_manager,
+    get_safety_switch,
     get_settings_store,
     get_system_monitor,
     get_vision_manager,
@@ -48,6 +49,7 @@ from jarvis.backend.core.lm_provider import EchoLMProvider, ModelInfo, ProviderS
 from jarvis.backend.core.memory_manager import MemoryManager
 from jarvis.backend.core.recovery_manager import RecoveryManager
 from jarvis.backend.core.settings_store import SettingsStore
+from jarvis.backend.core.safety_switch import SafetySwitch
 from jarvis.backend.core.vector_store import NullVectorStore
 from jarvis.backend.core.vision_manager import VisionManager
 from jarvis.backend.core.voice_manager import VoiceManager, WhisperCliSpeechToTextAdapter
@@ -165,8 +167,10 @@ class ApiTests(unittest.TestCase):
                 self.started = False
 
         self.wake_listener = StubWakeListener()
+        self.safety_switch = SafetySwitch(self.settings, event_bus=self.event_bus)
         app = create_app()
         app.dependency_overrides[get_core] = lambda: self.core
+        app.dependency_overrides[get_safety_switch] = lambda: self.safety_switch
         app.dependency_overrides[get_event_bus] = lambda: self.event_bus
         app.dependency_overrides[get_permission_manager] = lambda: self.permission_manager
         app.dependency_overrides[get_recovery_manager] = lambda: self.recovery
@@ -644,6 +648,29 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(nodes["automation_hub"]["tasks_total"], 1)
         self.assertEqual(nodes["security_mesh"]["pending_approvals"], 0)
         self.assertIn("voice_interface", nodes)
+
+    def test_emergency_stop_endpoints_round_trip(self) -> None:
+        status = self.client.get("/api/v1/system/safety").json()
+        self.assertFalse(status["engaged"])
+
+        # A bare POST with no body must still halt (panic button).
+        engaged = self.client.post("/api/v1/system/emergency-stop").json()
+        self.assertTrue(engaged["engaged"])
+        self.assertIn("system", engaged["blocked_bots"])
+
+        overview = self.client.get("/api/v1/system/overview").json()
+        self.assertFalse(overview["nodes"]["security_mesh"]["ok"])
+        self.assertTrue(overview["nodes"]["security_mesh"]["emergency_stop"])
+
+        released = self.client.post("/api/v1/system/resume").json()
+        self.assertFalse(released["engaged"])
+
+    def test_emergency_stop_accepts_reason(self) -> None:
+        engaged = self.client.post(
+            "/api/v1/system/emergency-stop", json={"reason": "fire drill"}
+        ).json()
+        self.assertEqual(engaged["reason"], "fire drill")
+        self.client.post("/api/v1/system/resume")
 
     def test_models_endpoint_reports_provider_status(self) -> None:
         self.core.lm_provider = StatusLMProvider()
