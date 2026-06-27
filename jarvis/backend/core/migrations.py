@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Callable
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 def _migration_1(connection: sqlite3.Connection) -> None:
@@ -111,10 +111,27 @@ def _migration_3(connection: sqlite3.Connection) -> None:
     )
 
 
+def _migration_4(connection: sqlite3.Connection) -> None:
+    # Identity persistence (master spec §4): a small key/value store holding
+    # Odin's evolving self-model — traits, the current narrative ("what I'm
+    # doing now"), a non-sentient mood tag, and interests. One row per key so a
+    # single field can be updated without rewriting the whole identity.
+    connection.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS identity_state (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL DEFAULT '',
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+        """
+    )
+
+
 MIGRATIONS: tuple[tuple[int, Callable[[sqlite3.Connection], None]], ...] = (
     (1, _migration_1),
     (2, _migration_2),
     (3, _migration_3),
+    (4, _migration_4),
 )
 
 

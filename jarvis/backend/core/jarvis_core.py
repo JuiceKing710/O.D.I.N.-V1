@@ -60,7 +60,8 @@ class JarvisCore:
                 image_url = bot_image_url
             else:
                 context = (
-                    self.memory.memory_block_context()
+                    self.memory.identity_context()
+                    + self.memory.memory_block_context()
                     + self.memory.fact_context(user.user_id)
                     + self.memory.query_context(user.user_id, normalized, limit=5)
                 )
