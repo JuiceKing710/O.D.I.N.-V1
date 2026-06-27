@@ -96,6 +96,35 @@ class IdentityUpdateRequest(BaseModel):
     interests: list[str] | None = None
 
 
+class HeartbeatStatusResponse(BaseModel):
+    enabled: bool
+    running: bool
+    interval_seconds: float
+    tick_count: int
+    last_tick_at: str | None = None
+    last_error: str | None = None
+    halted: bool = False
+
+
+class GoalResponse(BaseModel):
+    goal_id: int
+    user_id: int
+    text: str
+    status: str
+    created_at: datetime
+
+
+class GoalCreateRequest(BaseModel):
+    text: str
+    username: str = "local-user"
+
+
+class GoalUpdateRequest(BaseModel):
+    username: str = "local-user"
+    text: str | None = None
+    status: str | None = None
+
+
 class MemoryBlocksResponse(BaseModel):
     blocks: dict[str, str]
 

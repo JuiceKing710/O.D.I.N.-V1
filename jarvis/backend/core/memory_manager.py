@@ -90,6 +90,24 @@ class TaskRecord:
 
 
 @dataclass(slots=True)
+class GoalRecord:
+    goal_id: int
+    user_id: int
+    text: str
+    status: Literal["active", "done", "dropped"]
+    created_at: datetime
+
+    def to_api(self) -> dict[str, Any]:
+        return {
+            "goal_id": self.goal_id,
+            "user_id": self.user_id,
+            "text": self.text,
+            "status": self.status,
+            "created_at": self.created_at,
+        }
+
+
+@dataclass(slots=True)
 class ReflectionRecord:
     reflection_id: int
     convo_id: int
@@ -728,6 +746,82 @@ class MemoryManager:
                 (convo_id,),
             ).fetchall()
         return [self._message_from_row(row) for row in rows]
+
+    # Goals (master spec §3): the durable objectives the heartbeat checks drift
+    # against. Distinct from tasks (concrete to-dos) — goals are longer-lived.
+    def create_goal(self, user_id: int, text: str) -> GoalRecord:
+        cleaned = text.strip()
+        if not cleaned:
+            raise ValueError("goal text is required")
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "INSERT INTO goals(user_id, text, status) VALUES (?, ?, 'active')",
+                (user_id, cleaned),
+            )
+            row = conn.execute(
+                "SELECT goal_id, user_id, text, status, created_at FROM goals WHERE goal_id = ?",
+                (cursor.lastrowid,),
+            ).fetchone()
+        return self._goal_from_row(row)
+
+    def list_goals(self, user_id: int, status: str | None = None) -> list[GoalRecord]:
+        query = (
+            "SELECT goal_id, user_id, text, status, created_at FROM goals WHERE user_id = ?"
+        )
+        params: list[Any] = [user_id]
+        if status is not None:
+            query += " AND status = ?"
+            params.append(status)
+        query += " ORDER BY created_at DESC, goal_id DESC"
+        with self._connect() as conn:
+            rows = conn.execute(query, params).fetchall()
+        return [self._goal_from_row(row) for row in rows]
+
+    def update_goal(
+        self,
+        user_id: int,
+        goal_id: int,
+        *,
+        text: str | None = None,
+        status: Literal["active", "done", "dropped"] | None = None,
+    ) -> GoalRecord:
+        updates: list[str] = []
+        values: list[Any] = []
+        if text is not None:
+            if not text.strip():
+                raise ValueError("goal text is required")
+            updates.append("text = ?")
+            values.append(text.strip())
+        if status is not None:
+            if status not in {"active", "done", "dropped"}:
+                raise ValueError(f"Invalid goal status: {status}")
+            updates.append("status = ?")
+            values.append(status)
+        if not updates:
+            raise ValueError("No goal updates provided")
+        with self._connect() as conn:
+            cursor = conn.execute(
+                f"UPDATE goals SET {', '.join(updates)} WHERE goal_id = ? AND user_id = ?",
+                (*values, goal_id, user_id),
+            )
+            if cursor.rowcount == 0:
+                raise ValueError(f"Goal not found: {goal_id}")
+            row = conn.execute(
+                "SELECT goal_id, user_id, text, status, created_at FROM goals"
+                " WHERE goal_id = ? AND user_id = ?",
+                (goal_id, user_id),
+            ).fetchone()
+        return self._goal_from_row(row)
+
+    @classmethod
+    def _goal_from_row(cls, row: sqlite3.Row) -> GoalRecord:
+        return GoalRecord(
+            goal_id=row["goal_id"],
+            user_id=row["user_id"],
+            text=row["text"],
+            status=row["status"],
+            created_at=cls._parse_datetime(row["created_at"]),
+        )
 
     def delete_conversation(self, user_id: int, convo_id: int) -> None:
         self.get_conversation(convo_id, user_id)

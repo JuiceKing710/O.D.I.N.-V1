@@ -14,6 +14,7 @@ import asyncio
 from jarvis.backend.core.app_factory import (
     get_backup_scheduler,
     get_core,
+    get_heartbeat_engine,
     get_memory_consolidator,
     get_settings_store,
     get_system_monitor,
@@ -62,6 +63,8 @@ def create_app() -> FastAPI:
         monitor.start()
         consolidator = get_memory_consolidator()
         consolidator.start()
+        heartbeat = get_heartbeat_engine()
+        heartbeat.start()
         wake_listener = get_wake_word_listener()
         wake_listener.bind_loop(asyncio.get_running_loop())
         if get_settings_store().read().get("wake_word"):
@@ -70,6 +73,7 @@ def create_app() -> FastAPI:
             yield
         finally:
             wake_listener.stop()
+            await heartbeat.stop()
             await consolidator.stop()
             await monitor.stop()
             await scheduler.stop()
