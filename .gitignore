@@ -8,3 +8,6 @@ dist/
 .DS_Store
 node_modules.nosync/
 .venv.nosync/
+
+# Generated analysis cache (graphify)
+graphify-out/
