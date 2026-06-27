@@ -370,9 +370,12 @@ def get_heartbeat_engine() -> HeartbeatEngine:
         get_settings_store(),
         safety_switch=get_safety_switch(),
         event_bus=get_event_bus(),
+        improvement=get_improvement_manager(),
         interval_seconds=interval,
         enabled=os.environ.get("JARVIS_HEARTBEAT", "enabled").lower()
         not in {"0", "false", "disabled"},
+        # Surface a self-improvement proposal every Nth tick (0 disables).
+        propose_every=_env_int("JARVIS_HEARTBEAT_PROPOSE_EVERY", 10),
     )
 
 

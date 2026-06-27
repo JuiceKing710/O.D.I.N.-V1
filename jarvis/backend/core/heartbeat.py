@@ -7,6 +7,7 @@ from typing import Any
 
 from jarvis.backend.core.event_bus import EventBus
 from jarvis.backend.core.identity_manager import IdentityManager
+from jarvis.backend.core.improvement_manager import ImprovementManager
 from jarvis.backend.core.lm_provider import LMProviderInterface
 from jarvis.backend.core.memory_consolidator import MemoryConsolidator
 from jarvis.backend.core.memory_manager import MemoryManager
@@ -46,10 +47,12 @@ class HeartbeatEngine:
         settings: SettingsStore,
         safety_switch: SafetySwitch | None = None,
         event_bus: EventBus | None = None,
+        improvement: ImprovementManager | None = None,
         *,
         interval_seconds: float = 1800.0,
         enabled: bool = True,
         username: str = "local-user",
+        propose_every: int = 0,
     ) -> None:
         self.memory = memory
         self.lm_provider = lm_provider
@@ -58,9 +61,14 @@ class HeartbeatEngine:
         self.settings = settings
         self.safety_switch = safety_switch
         self.event_bus = event_bus
+        self.improvement = improvement
         self.interval_seconds = max(interval_seconds, 1.0)
         self.enabled = enabled
         self.username = username
+        # How often (in ticks) Odin surfaces a self-improvement proposal. 0
+        # disables it. Proposals are always created as `pending` — never applied
+        # without explicit human approval (master spec §8).
+        self.propose_every = max(propose_every, 0)
         self.last_error: str | None = None
         self._task: asyncio.Task | None = None
         self._stop = asyncio.Event()
@@ -81,6 +89,7 @@ class HeartbeatEngine:
         curiosity = await self._safe(self._generate_curiosity(user.user_id))
 
         tick_count = self._next_tick_count()
+        proposal = await self._safe(self._maybe_propose(tick_count))
         narrative = (
             f"On heartbeat {tick_count}: tending {len(active_goals)} active goal(s) "
             f"across {len(conversations)} conversation(s) in memory."
@@ -101,6 +110,7 @@ class HeartbeatEngine:
             "reflected_conversation": reflected,
             "goal_alignment": alignment,
             "curiosity": curiosity,
+            "improvement_proposal": proposal,
         }
         self._publish("heartbeat.tick", snapshot)
         return snapshot
@@ -166,6 +176,26 @@ class HeartbeatEngine:
         merged = [interest] + [item for item in existing if item != interest]
         self.identity.update({"interests": merged[:5]})
         return interest
+
+    async def _maybe_propose(self, tick_count: int) -> dict[str, Any] | None:
+        """Occasionally surface a self-improvement proposal (master spec §8).
+
+        Gated by ``propose_every`` and skipped if a proposal is already waiting,
+        so pending proposals never pile up. The proposal is created as
+        ``pending`` — Odin never applies its own change without human approval.
+        """
+        if self.improvement is None or self.propose_every <= 0:
+            return None
+        if tick_count % self.propose_every != 0:
+            return None
+        if self.improvement.list(status="pending"):
+            return None
+        record = await self.improvement.propose(
+            "memory",
+            "persona",
+            rationale=f"heartbeat {tick_count}: periodic self-review of voice",
+        )
+        return {"proposal_id": record.proposal_id, "target": record.target}
 
     # --- background loop ---------------------------------------------------
 

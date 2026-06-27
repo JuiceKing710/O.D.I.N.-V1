@@ -8,6 +8,7 @@ from pathlib import Path
 from jarvis.backend.core.event_bus import EventBus
 from jarvis.backend.core.heartbeat import HeartbeatEngine
 from jarvis.backend.core.identity_manager import IdentityManager
+from jarvis.backend.core.improvement_manager import ImprovementManager
 from jarvis.backend.core.lm_provider import EchoLMProvider
 from jarvis.backend.core.memory_consolidator import MemoryConsolidator
 from jarvis.backend.core.memory_manager import MemoryManager
@@ -77,6 +78,51 @@ class HeartbeatTests(unittest.TestCase):
 
         self.assertEqual(result["reflected_conversation"], convo.convo_id)
         self.assertTrue(self.memory.list_reflection_summaries(convo.convo_id))
+
+    def _engine_with_improvement(self, propose_every: int) -> HeartbeatEngine:
+        improvement = ImprovementManager(
+            self.memory, self.settings, self.provider, self.safety, self.events
+        )
+        return HeartbeatEngine(
+            self.memory,
+            self.provider,
+            self.identity,
+            self.consolidator,
+            self.settings,
+            safety_switch=self.safety,
+            event_bus=self.events,
+            improvement=improvement,
+            enabled=False,
+            propose_every=propose_every,
+        )
+
+    def test_default_engine_never_proposes(self) -> None:
+        # The base engine (no improvement manager, propose_every=0) stays quiet.
+        result = asyncio.run(self.engine.tick())
+        self.assertIsNone(result["improvement_proposal"])
+        self.assertEqual(self.memory.list_proposals(), [])
+
+    def test_heartbeat_surfaces_pending_proposal(self) -> None:
+        engine = self._engine_with_improvement(propose_every=1)
+        result = asyncio.run(engine.tick())
+        self.assertIsNotNone(result["improvement_proposal"])
+        pending = self.memory.list_proposals(status="pending")
+        self.assertEqual(len(pending), 1)
+        self.assertEqual(pending[0].target, "persona")
+
+    def test_heartbeat_does_not_pile_up_proposals(self) -> None:
+        engine = self._engine_with_improvement(propose_every=1)
+        asyncio.run(engine.tick())
+        asyncio.run(engine.tick())
+        # A proposal is already pending, so the second tick adds none.
+        self.assertEqual(len(self.memory.list_proposals(status="pending")), 1)
+
+    def test_proposal_cadence_is_respected(self) -> None:
+        engine = self._engine_with_improvement(propose_every=2)
+        first = asyncio.run(engine.tick())  # tick 1 — not a multiple of 2
+        self.assertIsNone(first["improvement_proposal"])
+        second = asyncio.run(engine.tick())  # tick 2 — proposes
+        self.assertIsNotNone(second["improvement_proposal"])
 
     def test_goal_crud_round_trips(self) -> None:
         user = self.memory.get_or_create_user("local-user")
