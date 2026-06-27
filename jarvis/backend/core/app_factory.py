@@ -23,6 +23,7 @@ from jarvis.backend.core.jarvis_core import JarvisCore
 from jarvis.backend.core.lm_provider import EchoLMProvider, OllamaProvider, TurboSwitchProvider
 from jarvis.backend.core.heartbeat import HeartbeatEngine
 from jarvis.backend.core.identity_manager import IdentityManager
+from jarvis.backend.core.improvement_manager import ImprovementManager
 from jarvis.backend.core.memory_consolidator import MemoryConsolidator
 from jarvis.backend.core.memory_manager import MemoryManager
 from jarvis.backend.core.recovery_manager import RecoveryManager
@@ -340,6 +341,18 @@ def get_image_manager() -> ImageManager:
 @lru_cache(maxsize=1)
 def get_identity_manager() -> IdentityManager:
     return IdentityManager(get_core().memory, event_bus=get_event_bus())
+
+
+@lru_cache(maxsize=1)
+def get_improvement_manager() -> ImprovementManager:
+    core = get_core()
+    return ImprovementManager(
+        core.memory,
+        get_settings_store(),
+        core.lm_provider,
+        safety_switch=get_safety_switch(),
+        event_bus=get_event_bus(),
+    )
 
 
 @lru_cache(maxsize=1)

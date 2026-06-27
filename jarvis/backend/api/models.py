@@ -125,6 +125,25 @@ class GoalUpdateRequest(BaseModel):
     status: str | None = None
 
 
+class ProposalResponse(BaseModel):
+    proposal_id: int
+    kind: str
+    target: str
+    current_value: str | None = None
+    proposed_value: str
+    rationale: str | None = None
+    status: str
+    created_at: datetime
+    decided_at: datetime | None = None
+
+
+class ProposalCreateRequest(BaseModel):
+    kind: str
+    target: str
+    proposed_value: str | None = None
+    rationale: str | None = None
+
+
 class MemoryBlocksResponse(BaseModel):
     blocks: dict[str, str]
 

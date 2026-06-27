@@ -48,6 +48,8 @@ from jarvis.backend.api.models import (
     PermissionRequestResponse,
     PermissionResolveRequest,
     PermissionResolveResponse,
+    ProposalCreateRequest,
+    ProposalResponse,
     ResearchAgentRequest,
     ResearchRunResponse,
     SafetyStatusResponse,
@@ -82,6 +84,7 @@ from jarvis.backend.core.app_factory import (
     get_heartbeat_engine,
     get_identity_manager,
     get_image_manager,
+    get_improvement_manager,
     get_permission_manager,
     get_recovery_manager,
     get_memory_consolidator,
@@ -102,6 +105,7 @@ from jarvis.backend.core.image_manager import ImageManager
 from jarvis.backend.core.jarvis_core import JarvisCore
 from jarvis.backend.core.heartbeat import HeartbeatEngine
 from jarvis.backend.core.identity_manager import IdentityManager
+from jarvis.backend.core.improvement_manager import ImprovementManager
 from jarvis.backend.core.recovery_manager import RecoveryManager
 from jarvis.backend.core.safety_switch import SafetySwitch
 from jarvis.backend.core.settings_store import SettingsStore
@@ -357,6 +361,80 @@ def update_goal(
         raise HTTPException(status_code=status_code, detail=str(exc)) from exc
     event_bus.publish("goal.updated", {"goal": goal.to_api(), "action": "updated"})
     return GoalResponse(**goal.to_api())
+
+
+@router.get("/improvements", response_model=list[ProposalResponse])
+def list_improvements(
+    status: str | None = None,
+    improvements: ImprovementManager = Depends(get_improvement_manager),
+) -> list[ProposalResponse]:
+    return [ProposalResponse(**record.to_api()) for record in improvements.list(status=status)]
+
+
+@router.post("/improvements", response_model=ProposalResponse)
+async def propose_improvement(
+    request: ProposalCreateRequest,
+    improvements: ImprovementManager = Depends(get_improvement_manager),
+) -> ProposalResponse:
+    try:
+        record = await improvements.propose(
+            request.kind,
+            request.target,
+            proposed_value=request.proposed_value,
+            rationale=request.rationale,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return ProposalResponse(**record.to_api())
+
+
+def _improvement_transition(
+    proposal_id: int, action: str, improvements: ImprovementManager
+) -> ProposalResponse:
+    handler = {
+        "approve": improvements.approve,
+        "reject": improvements.reject,
+        "apply": improvements.apply,
+        "revert": improvements.revert,
+    }[action]
+    try:
+        record = handler(proposal_id)
+    except ValueError as exc:
+        status_code = 404 if "not found" in str(exc).lower() else 409
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+    return ProposalResponse(**record.to_api())
+
+
+@router.post("/improvements/{proposal_id}/approve", response_model=ProposalResponse)
+def approve_improvement(
+    proposal_id: int,
+    improvements: ImprovementManager = Depends(get_improvement_manager),
+) -> ProposalResponse:
+    return _improvement_transition(proposal_id, "approve", improvements)
+
+
+@router.post("/improvements/{proposal_id}/reject", response_model=ProposalResponse)
+def reject_improvement(
+    proposal_id: int,
+    improvements: ImprovementManager = Depends(get_improvement_manager),
+) -> ProposalResponse:
+    return _improvement_transition(proposal_id, "reject", improvements)
+
+
+@router.post("/improvements/{proposal_id}/apply", response_model=ProposalResponse)
+def apply_improvement(
+    proposal_id: int,
+    improvements: ImprovementManager = Depends(get_improvement_manager),
+) -> ProposalResponse:
+    return _improvement_transition(proposal_id, "apply", improvements)
+
+
+@router.post("/improvements/{proposal_id}/revert", response_model=ProposalResponse)
+def revert_improvement(
+    proposal_id: int,
+    improvements: ImprovementManager = Depends(get_improvement_manager),
+) -> ProposalResponse:
+    return _improvement_transition(proposal_id, "revert", improvements)
 
 
 @router.post("/chat", response_model=ChatResponse)
