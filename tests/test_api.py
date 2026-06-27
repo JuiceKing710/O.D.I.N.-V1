@@ -29,6 +29,7 @@ from jarvis.backend.core.app_factory import (
     get_backup_scheduler,
     get_core,
     get_event_bus,
+    get_heartbeat_engine,
     get_image_manager,
     get_permission_manager,
     get_recovery_manager,
@@ -50,6 +51,9 @@ from jarvis.backend.core.memory_manager import MemoryManager
 from jarvis.backend.core.recovery_manager import RecoveryManager
 from jarvis.backend.core.settings_store import SettingsStore
 from jarvis.backend.core.safety_switch import SafetySwitch
+from jarvis.backend.core.heartbeat import HeartbeatEngine
+from jarvis.backend.core.identity_manager import IdentityManager
+from jarvis.backend.core.memory_consolidator import MemoryConsolidator
 from jarvis.backend.core.vector_store import NullVectorStore
 from jarvis.backend.core.vision_manager import VisionManager
 from jarvis.backend.core.voice_manager import VoiceManager, WhisperCliSpeechToTextAdapter
@@ -168,9 +172,22 @@ class ApiTests(unittest.TestCase):
 
         self.wake_listener = StubWakeListener()
         self.safety_switch = SafetySwitch(self.settings, event_bus=self.event_bus)
+        self.heartbeat = HeartbeatEngine(
+            self.memory,
+            self.core.lm_provider,
+            IdentityManager(self.memory, self.event_bus),
+            MemoryConsolidator(
+                self.memory, self.core.lm_provider, self.settings, self.event_bus, enabled=False
+            ),
+            self.settings,
+            safety_switch=self.safety_switch,
+            event_bus=self.event_bus,
+            enabled=False,
+        )
         app = create_app()
         app.dependency_overrides[get_core] = lambda: self.core
         app.dependency_overrides[get_safety_switch] = lambda: self.safety_switch
+        app.dependency_overrides[get_heartbeat_engine] = lambda: self.heartbeat
         app.dependency_overrides[get_event_bus] = lambda: self.event_bus
         app.dependency_overrides[get_permission_manager] = lambda: self.permission_manager
         app.dependency_overrides[get_recovery_manager] = lambda: self.recovery
@@ -671,6 +688,46 @@ class ApiTests(unittest.TestCase):
         ).json()
         self.assertEqual(engaged["reason"], "fire drill")
         self.client.post("/api/v1/system/resume")
+
+    def test_heartbeat_tick_endpoint_advances_and_status_reflects(self) -> None:
+        status = self.client.get("/api/v1/heartbeat").json()
+        self.assertEqual(status["tick_count"], 0)
+
+        ticked = self.client.post("/api/v1/heartbeat/tick").json()
+        self.assertFalse(ticked["skipped"])
+        self.assertEqual(ticked["tick"], 1)
+
+        after = self.client.get("/api/v1/heartbeat").json()
+        self.assertEqual(after["tick_count"], 1)
+
+        overview = self.client.get("/api/v1/system/overview").json()
+        self.assertEqual(overview["nodes"]["continuity_engine"]["tick_count"], 1)
+
+    def test_heartbeat_tick_skipped_while_halted(self) -> None:
+        self.client.post("/api/v1/system/emergency-stop")
+        ticked = self.client.post("/api/v1/heartbeat/tick").json()
+        self.assertTrue(ticked["skipped"])
+        self.client.post("/api/v1/system/resume")
+
+    def test_goals_endpoints_round_trip(self) -> None:
+        created = self.client.post(
+            "/api/v1/goals", json={"text": "finish the project", "username": "local-user"}
+        ).json()
+        self.assertEqual(created["status"], "active")
+        goal_id = created["goal_id"]
+
+        active = self.client.get("/api/v1/goals?status=active").json()
+        self.assertEqual(len(active), 1)
+
+        updated = self.client.patch(
+            f"/api/v1/goals/{goal_id}", json={"status": "done"}
+        ).json()
+        self.assertEqual(updated["status"], "done")
+        self.assertEqual(self.client.get("/api/v1/goals?status=active").json(), [])
+
+    def test_update_unknown_goal_returns_404(self) -> None:
+        response = self.client.patch("/api/v1/goals/999", json={"status": "done"})
+        self.assertEqual(response.status_code, 404)
 
     def test_models_endpoint_reports_provider_status(self) -> None:
         self.core.lm_provider = StatusLMProvider()

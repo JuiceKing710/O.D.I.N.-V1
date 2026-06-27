@@ -21,6 +21,7 @@ from jarvis.backend.core.event_bus import EventBus
 from jarvis.backend.core.file_snapshot import FileSnapshotStore
 from jarvis.backend.core.jarvis_core import JarvisCore
 from jarvis.backend.core.lm_provider import EchoLMProvider, OllamaProvider, TurboSwitchProvider
+from jarvis.backend.core.heartbeat import HeartbeatEngine
 from jarvis.backend.core.identity_manager import IdentityManager
 from jarvis.backend.core.memory_consolidator import MemoryConsolidator
 from jarvis.backend.core.memory_manager import MemoryManager
@@ -339,6 +340,27 @@ def get_image_manager() -> ImageManager:
 @lru_cache(maxsize=1)
 def get_identity_manager() -> IdentityManager:
     return IdentityManager(get_core().memory, event_bus=get_event_bus())
+
+
+@lru_cache(maxsize=1)
+def get_heartbeat_engine() -> HeartbeatEngine:
+    core = get_core()
+    try:
+        interval = float(os.environ.get("JARVIS_HEARTBEAT_INTERVAL_SECONDS", "1800"))
+    except ValueError:
+        interval = 1800.0
+    return HeartbeatEngine(
+        core.memory,
+        core.lm_provider,
+        get_identity_manager(),
+        get_memory_consolidator(),
+        get_settings_store(),
+        safety_switch=get_safety_switch(),
+        event_bus=get_event_bus(),
+        interval_seconds=interval,
+        enabled=os.environ.get("JARVIS_HEARTBEAT", "enabled").lower()
+        not in {"0", "false", "disabled"},
+    )
 
 
 @lru_cache(maxsize=1)

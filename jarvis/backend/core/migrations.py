@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Callable
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 
 def _migration_1(connection: sqlite3.Connection) -> None:
@@ -127,11 +127,31 @@ def _migration_4(connection: sqlite3.Connection) -> None:
     )
 
 
+def _migration_5(connection: sqlite3.Connection) -> None:
+    # Goals (master spec §3 — heartbeat goal-alignment): the durable goals the
+    # heartbeat loop checks drift against each tick. Curiosity/interest items
+    # reuse the existing documents table (source='curiosity'), so no table here.
+    connection.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS goals (
+          goal_id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL,
+          text TEXT NOT NULL,
+          status TEXT CHECK(status IN ('active','done','dropped')) NOT NULL DEFAULT 'active',
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY(user_id) REFERENCES users(user_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_goals_user_status ON goals(user_id, status);
+        """
+    )
+
+
 MIGRATIONS: tuple[tuple[int, Callable[[sqlite3.Connection], None]], ...] = (
     (1, _migration_1),
     (2, _migration_2),
     (3, _migration_3),
     (4, _migration_4),
+    (5, _migration_5),
 )
 
 

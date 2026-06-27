@@ -27,6 +27,10 @@ from jarvis.backend.api.models import (
     DocumentResponse,
     EmergencyStopRequest,
     EventResponse,
+    GoalCreateRequest,
+    GoalResponse,
+    GoalUpdateRequest,
+    HeartbeatStatusResponse,
     IdentityResponse,
     IdentityUpdateRequest,
     ImageGenerateRequest,
@@ -75,6 +79,7 @@ from jarvis.backend.core.app_factory import (
     get_audit_logger,
     get_core,
     get_event_bus,
+    get_heartbeat_engine,
     get_identity_manager,
     get_image_manager,
     get_permission_manager,
@@ -95,6 +100,7 @@ from jarvis.backend.core.bot_manager import BotMessage
 from jarvis.backend.core.event_bus import EventBus
 from jarvis.backend.core.image_manager import ImageManager
 from jarvis.backend.core.jarvis_core import JarvisCore
+from jarvis.backend.core.heartbeat import HeartbeatEngine
 from jarvis.backend.core.identity_manager import IdentityManager
 from jarvis.backend.core.recovery_manager import RecoveryManager
 from jarvis.backend.core.safety_switch import SafetySwitch
@@ -177,6 +183,7 @@ async def system_overview(
     permission_manager: PermissionManager = Depends(get_permission_manager),
     scheduler: BackupScheduler = Depends(get_backup_scheduler),
     safety: SafetySwitch = Depends(get_safety_switch),
+    heartbeat: HeartbeatEngine = Depends(get_heartbeat_engine),
 ) -> SystemOverviewResponse:
     provider = await core.lm_provider.status()
     voice = voice_manager.status()
@@ -187,6 +194,7 @@ async def system_overview(
     conversations = core.memory.list_conversations(user.user_id, limit=100)
     pending_approvals = permission_manager.pending_requests()
     halted = safety.is_engaged()
+    heartbeat_state = heartbeat.status()
     nodes = {
         "reasoning_engine": {
             "ok": provider.available,
@@ -235,6 +243,17 @@ async def system_overview(
             "ok": True,
             "label": "connected",
         },
+        "continuity_engine": {
+            "ok": heartbeat_state["last_error"] is None,
+            "label": (
+                f"{heartbeat_state['tick_count']} heartbeat(s)"
+                if heartbeat_state["enabled"]
+                else "disabled"
+            ),
+            "tick_count": heartbeat_state["tick_count"],
+            "last_tick_at": heartbeat_state["last_tick_at"],
+            "running": heartbeat_state["running"],
+        },
     }
     return SystemOverviewResponse(metrics=monitor.snapshot(), nodes=nodes)
 
@@ -277,6 +296,67 @@ def update_identity(
 ) -> IdentityResponse:
     patch = request.model_dump(exclude_none=True)
     return IdentityResponse(**identity.update(patch))
+
+
+@router.get("/heartbeat", response_model=HeartbeatStatusResponse)
+def heartbeat_status(
+    heartbeat: HeartbeatEngine = Depends(get_heartbeat_engine),
+) -> HeartbeatStatusResponse:
+    return HeartbeatStatusResponse(**heartbeat.status())
+
+
+@router.post("/heartbeat/tick", response_model=dict)
+async def heartbeat_tick(
+    heartbeat: HeartbeatEngine = Depends(get_heartbeat_engine),
+) -> dict:
+    return await heartbeat.tick()
+
+
+@router.get("/goals", response_model=list[GoalResponse])
+def list_goals(
+    username: str = "local-user",
+    status: str | None = None,
+    core: JarvisCore = Depends(get_core),
+) -> list[GoalResponse]:
+    user = core.memory.get_or_create_user(username)
+    return [
+        GoalResponse(**goal.to_api())
+        for goal in core.memory.list_goals(user.user_id, status=status)
+    ]
+
+
+@router.post("/goals", response_model=GoalResponse)
+def create_goal(
+    request: GoalCreateRequest,
+    core: JarvisCore = Depends(get_core),
+    event_bus: EventBus = Depends(get_event_bus),
+) -> GoalResponse:
+    user = core.memory.get_or_create_user(request.username)
+    try:
+        goal = core.memory.create_goal(user.user_id, request.text)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    event_bus.publish("goal.updated", {"goal": goal.to_api(), "action": "created"})
+    return GoalResponse(**goal.to_api())
+
+
+@router.patch("/goals/{goal_id}", response_model=GoalResponse)
+def update_goal(
+    goal_id: int,
+    request: GoalUpdateRequest,
+    core: JarvisCore = Depends(get_core),
+    event_bus: EventBus = Depends(get_event_bus),
+) -> GoalResponse:
+    user = core.memory.get_or_create_user(request.username)
+    try:
+        goal = core.memory.update_goal(
+            user.user_id, goal_id, text=request.text, status=request.status
+        )
+    except ValueError as exc:
+        status_code = 404 if "Goal not found" in str(exc) else 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+    event_bus.publish("goal.updated", {"goal": goal.to_api(), "action": "updated"})
+    return GoalResponse(**goal.to_api())
 
 
 @router.post("/chat", response_model=ChatResponse)
