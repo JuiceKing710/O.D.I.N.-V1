@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import shlex
 import subprocess
 from pathlib import Path
@@ -10,6 +11,9 @@ from jarvis.backend.bots.base import Bot, BotRequest, BotResponse
 class SystemBot(Bot):
     name = "system"
     description = "Mediates local system actions behind explicit permissions."
+    # Commands may legitimately run up to their 120s subprocess cap; the
+    # dispatch timeout must outlive it or every long command dies at dispatch.
+    timeout_seconds = 130.0
 
     async def on_request(self, request: BotRequest) -> BotResponse:
         if request.action != "execute":
@@ -40,7 +44,10 @@ class SystemBot(Bot):
         except (TypeError, ValueError):
             return BotResponse(ok=False, error="Command timeout must be a number")
         try:
-            result = subprocess.run(
+            # subprocess.run blocks; run it off the event loop so a long command
+            # doesn't freeze every other request in the process.
+            result = await asyncio.to_thread(
+                subprocess.run,
                 argv,
                 capture_output=True,
                 check=False,

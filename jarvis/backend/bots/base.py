@@ -26,6 +26,11 @@ class BotResponse:
 class Bot(ABC):
     name: str
     description: str
+    # Per-bot dispatch timeout; None uses BotManager's default. Bots whose
+    # actions legitimately run long (shell commands, image generation, page
+    # fetches) override this so the dispatch timeout matches the slowest
+    # operation they can perform instead of killing it mid-flight.
+    timeout_seconds: float | None = None
 
     def __init__(self, permission_manager: PermissionManager, audit_logger: AuditLogger) -> None:
         self.permission_manager = permission_manager

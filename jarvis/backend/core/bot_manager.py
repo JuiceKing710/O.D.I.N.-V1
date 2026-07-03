@@ -102,10 +102,13 @@ class BotManager:
             correlation_id=message.correlation_id,
         )
         self._publish_status(message, "acknowledged")
+        timeout_seconds = (
+            bot.timeout_seconds if bot.timeout_seconds is not None else self.timeout_seconds
+        )
         attempts = self.retry_count + 1
         for attempt in range(1, attempts + 1):
             try:
-                response = await asyncio.wait_for(bot.on_request(request), self.timeout_seconds)
+                response = await asyncio.wait_for(bot.on_request(request), timeout_seconds)
                 self.audit_logger.log(
                     actor=message.sender,
                     action=f"bot:{message.recipient}:{message.action}",

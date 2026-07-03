@@ -38,6 +38,10 @@ def _html_to_text(body: str) -> str:
 class ResearchBot(Bot):
     name = "research"
     description = "Coordinates external lookup and page fetches behind network permissions."
+    # A page fetch may take up to 20s plus the throttle gap; the dispatch
+    # timeout must cover it now that network I/O runs off the event loop
+    # (a blocked loop used to mask the default 10s timeout entirely).
+    timeout_seconds = 25.0
 
     # Basic per-process rate limit: serialize requests and keep a minimum gap so
     # Odin does not hammer external services.

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import subprocess
 from collections.abc import Callable
 from typing import Any
@@ -27,6 +28,8 @@ class DesktopBot(Bot):
     description = "Controls native macOS apps via AppleScript behind a control-desktop permission."
 
     TIMEOUT_SECONDS = 30.0
+    # Dispatch must outlive the osascript timeout above, with margin.
+    timeout_seconds = 35.0
 
     def __init__(
         self,
@@ -63,7 +66,8 @@ class DesktopBot(Bot):
             script_lines, args = builder(request.payload)
         except ValueError as exc:
             return BotResponse(ok=False, error=str(exc))
-        return self._execute(request.action, script_lines, args)
+        # osascript blocks for up to TIMEOUT_SECONDS; keep it off the event loop.
+        return await asyncio.to_thread(self._execute, request.action, script_lines, args)
 
     # ---- action builders (return AppleScript lines + argv) ----------------
 
