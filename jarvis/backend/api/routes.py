@@ -510,12 +510,24 @@ def export_conversation(
     core: JarvisCore = Depends(get_core),
 ) -> ConversationExportResponse:
     user = core.memory.get_or_create_user(username)
-    core.memory.get_conversation(conversation_id, user.user_id)
+    try:
+        core.memory.get_conversation(conversation_id, user.user_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     summary = next(
-        item
-        for item in core.memory.list_conversations(user.user_id, limit=1000)
-        if item.convo_id == conversation_id
+        (
+            item
+            for item in core.memory.list_conversations(user.user_id, limit=1000)
+            if item.convo_id == conversation_id
+        ),
+        None,
     )
+    if summary is None:
+        # The conversation exists but fell outside the summary window; a bare
+        # next() here would surface as an opaque 500.
+        raise HTTPException(
+            status_code=404, detail=f"Conversation summary not found: {conversation_id}"
+        )
     return ConversationExportResponse(
         conversation=ConversationSummaryResponse(**summary.to_api()),
         messages=[
