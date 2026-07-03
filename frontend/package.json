@@ -15,8 +15,13 @@
   "build": {
     "appId": "com.odin.core",
     "productName": "O.D.I.N. Core System",
-    "files": ["dist/**/*", "electron/**/*"],
-    "directories": { "buildResources": "build" },
+    "files": [
+      "dist/**/*",
+      "electron/**/*"
+    ],
+    "directories": {
+      "buildResources": "build"
+    },
     "mac": {
       "category": "public.app-category.productivity",
       "hardenedRuntime": true,
@@ -39,7 +44,7 @@
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "electron": "^39.2.7",
-    "electron-builder": "^25.1.8",
+    "electron-builder": "^26.15.3",
     "jsdom": "^29.1.1",
     "vitest": "^4.1.8"
   }
