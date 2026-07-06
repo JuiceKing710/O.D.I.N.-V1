@@ -10,6 +10,8 @@ from jarvis.backend.utils.atomic_write import atomic_write_text
 DEFAULT_SETTINGS: dict[str, Any] = {
     "voice_mode": "push_to_talk",
     "model_name": "local-default",
+    # Whisper speech model filename inside the models dir ("" = default base.en).
+    "whisper_model": "",
     "theme": "system",
     "permissions": {},
     "turbo_mode": False,

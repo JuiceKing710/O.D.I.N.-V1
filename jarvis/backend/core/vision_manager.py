@@ -22,6 +22,36 @@ DEFAULT_VISION_PROMPT = (
     "notable in the scene."
 )
 
+DEFAULT_SCREEN_PROMPT = (
+    "You are Odin's screen awareness. Describe what is currently on the user's "
+    "screen in two or three concise sentences: the app in focus, what the user "
+    "appears to be working on, and any notable dialogs or errors."
+)
+
+
+def capture_screen(screencapture_executable: str = "screencapture") -> bytes:
+    """Capture the main display to JPEG bytes via macOS ``screencapture -x``.
+
+    Requires the Screen Recording privacy permission; without it macOS returns
+    a desktop-wallpaper-only image or an error, so the failure message points
+    the user at System Settings."""
+    with tempfile.TemporaryDirectory() as temporary_dir:
+        target = Path(temporary_dir) / "screen.jpg"
+        result = subprocess.run(
+            [screencapture_executable, "-x", "-t", "jpg", str(target)],
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=15,
+        )
+        if result.returncode != 0 or not target.is_file():
+            raise RuntimeError(
+                (result.stderr or "").strip()
+                or "Screen capture failed — grant O.D.I.N. Screen Recording "
+                "access in System Settings → Privacy & Security."
+            )
+        return target.read_bytes()
+
 _MIME_BY_SUFFIX = {
     ".jpg": "image/jpeg",
     ".jpeg": "image/jpeg",
@@ -99,11 +129,15 @@ class OllamaVisionAdapter:
         model: str = "llava",
         base_url: str = "http://127.0.0.1:11434",
         timeout_seconds: float = 120.0,
+        keep_alive: str | None = None,
     ) -> None:
         self.model = model
         self.base_url = base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
-        self.keep_alive = ollama_keep_alive()
+        # Vision calls are occasional while the chat model needs the RAM
+        # constantly, so callers may pass "0" to evict the VLM right after each
+        # analysis instead of the shared keep-alive window.
+        self.keep_alive = ollama_keep_alive() if keep_alive is None else keep_alive
 
     @classmethod
     def available(cls, base_url: str, model: str, timeout_seconds: float = 5.0) -> bool:
@@ -126,6 +160,10 @@ class OllamaVisionAdapter:
                 "messages": [{"role": "user", "content": prompt, "images": [encoded]}],
                 "stream": False,
                 "keep_alive": self.keep_alive,
+                # Thinking-capable models (qwen3.5) reason for ~30s per frame
+                # when left on; a frame description doesn't need it. Models
+                # without thinking accept and ignore the flag.
+                "think": False,
             }
         ).encode("utf-8")
         request = urllib.request.Request(

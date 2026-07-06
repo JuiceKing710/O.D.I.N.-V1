@@ -83,8 +83,11 @@ async function request(path, options = {}) {
     } catch {
       // Keep the status-only message when the server does not return JSON.
     }
-    const error = new Error(detail);
+    const error = new Error(
+      typeof detail === "string" ? detail : detail?.message || `Request failed: ${response.status}`,
+    );
     error.status = response.status;
+    error.detail = detail;
     throw error;
   }
   return response.json();
@@ -121,6 +124,17 @@ export function setupVoiceModel() {
   return request("/api/v1/voice/setup", { method: "POST" });
 }
 
+export function fetchVoiceModels() {
+  return request("/api/v1/voice/models");
+}
+
+export function loadVoiceModel(modelName) {
+  return request("/api/v1/voice/models/load", {
+    method: "POST",
+    body: JSON.stringify({ model_name: modelName }),
+  });
+}
+
 export function transcribeVoiceAudio({ audioBase64, audioSuffix = ".webm" }) {
   return request("/api/v1/voice/transcribe", {
     method: "POST",
@@ -143,6 +157,13 @@ export function synthesizeVoice({ text, voiceName = null }) {
 
 export function fetchVisionStatus() {
   return request("/api/v1/vision/status");
+}
+
+export function analyzeScreen(prompt = null) {
+  return request("/api/v1/vision/screen", {
+    method: "POST",
+    body: JSON.stringify({ prompt }),
+  });
 }
 
 export function analyzeVisionImage({ imageBase64, imageSuffix = ".jpg", prompt = null }) {
