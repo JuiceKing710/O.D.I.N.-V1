@@ -510,12 +510,10 @@ def export_conversation(
     core: JarvisCore = Depends(get_core),
 ) -> ConversationExportResponse:
     user = core.memory.get_or_create_user(username)
-    core.memory.get_conversation(conversation_id, user.user_id)
-    summary = next(
-        item
-        for item in core.memory.list_conversations(user.user_id, limit=1000)
-        if item.convo_id == conversation_id
-    )
+    try:
+        summary = core.memory.get_conversation_summary(conversation_id, user.user_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     return ConversationExportResponse(
         conversation=ConversationSummaryResponse(**summary.to_api()),
         messages=[

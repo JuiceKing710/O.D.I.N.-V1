@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import json
-import os
-import tempfile
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
+
+from jarvis.backend.utils.atomic_write import atomic_write_bytes
 
 
 class FileSnapshotStore:
@@ -124,8 +124,4 @@ class FileSnapshotStore:
 
     @staticmethod
     def _atomic_write_bytes(path: Path, data: bytes) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as handle:
-            temporary_path = Path(handle.name)
-            handle.write(data)
-        os.replace(temporary_path, path)
+        atomic_write_bytes(path, data)

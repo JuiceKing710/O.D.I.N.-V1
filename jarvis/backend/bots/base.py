@@ -26,6 +26,16 @@ class BotResponse:
 class Bot(ABC):
     name: str
     description: str
+    # Per-bot dispatch timeout; None uses BotManager's default. Bots whose
+    # actions legitimately run long (shell commands, image generation, page
+    # fetches) override this so the dispatch timeout matches the slowest
+    # operation they can perform instead of killing it mid-flight.
+    timeout_seconds: float | None = None
+    # Whether a timed-out dispatch may be retried. A timeout cannot cancel the
+    # worker thread the action runs on, so for side-effectful bots (shell
+    # commands, desktop control, image generation, file writes) a retry would
+    # run the action a second time while the first is still executing.
+    retry_on_timeout: bool = True
 
     def __init__(self, permission_manager: PermissionManager, audit_logger: AuditLogger) -> None:
         self.permission_manager = permission_manager

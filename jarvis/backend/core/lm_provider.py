@@ -221,7 +221,11 @@ class OllamaProvider(LMProviderInterface):
                 "keep_alive": self.keep_alive,
             }
         ).encode("utf-8")
-        body = self._request_json(
+        # A local generate can take up to timeout_seconds (120s default); run the
+        # blocking urllib call off the event loop so chat, the WebSocket, and the
+        # heartbeat are not frozen for its whole duration.
+        body = await asyncio.to_thread(
+            self._request_json,
             "/api/chat",
             method="POST",
             data=payload,
@@ -272,7 +276,7 @@ class OllamaProvider(LMProviderInterface):
 
     async def list_models(self) -> list[ModelInfo]:
         try:
-            models = self._fetch_model_names()
+            models = await asyncio.to_thread(self._fetch_model_names)
         except RuntimeError:
             return []
         selected = self._selected_model_from(models)
@@ -285,7 +289,7 @@ class OllamaProvider(LMProviderInterface):
         cleaned = model_name.strip()
         if not cleaned:
             raise ValueError("model_name is required")
-        models = self._fetch_model_names()
+        models = await asyncio.to_thread(self._fetch_model_names)
         if cleaned not in models:
             raise RuntimeError(
                 f"Ollama model '{cleaned}' is not installed. Run `ollama pull {cleaned}`."
@@ -295,7 +299,7 @@ class OllamaProvider(LMProviderInterface):
 
     async def status(self) -> ProviderStatus:
         try:
-            models = self._fetch_model_names()
+            models = await asyncio.to_thread(self._fetch_model_names)
         except RuntimeError as exc:
             return ProviderStatus(
                 provider="ollama",
@@ -333,7 +337,7 @@ class OllamaProvider(LMProviderInterface):
 
     async def _selected_model_or_raise(self) -> str:
         try:
-            models = self._fetch_model_names()
+            models = await asyncio.to_thread(self._fetch_model_names)
         except RuntimeError as exc:
             raise RuntimeError(
                 f"Ollama is not running at {self.base_url}. Run `ollama serve`."
@@ -461,6 +465,17 @@ class GeminiProvider(LMProviderInterface):
         history: list[HistoryTurn] | None = None,
     ) -> str:
         payload = json.dumps(self._build_payload(text, context, history)).encode("utf-8")
+        body = await asyncio.to_thread(self._request_generate, payload)
+        try:
+            parts = body["candidates"][0]["content"]["parts"]
+            reply = "".join(part.get("text", "") for part in parts).strip()
+        except (KeyError, IndexError, TypeError) as exc:
+            raise RuntimeError("Gemini returned an unexpected response") from exc
+        if not reply:
+            raise RuntimeError("Gemini returned an empty response")
+        return reply
+
+    def _request_generate(self, payload: bytes) -> dict[str, Any]:
         request = urllib.request.Request(
             f"{self.base_url}/v1beta/models/{self.model}:generateContent",
             data=payload,
@@ -472,19 +487,11 @@ class GeminiProvider(LMProviderInterface):
         )
         try:
             with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
-                body = json.loads(response.read().decode("utf-8"))
+                return json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             raise RuntimeError(f"Gemini request failed: {_gemini_error_detail(exc)}") from exc
         except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
             raise RuntimeError(f"Gemini request failed: {exc}") from exc
-        try:
-            parts = body["candidates"][0]["content"]["parts"]
-            reply = "".join(part.get("text", "") for part in parts).strip()
-        except (KeyError, IndexError, TypeError) as exc:
-            raise RuntimeError("Gemini returned an unexpected response") from exc
-        if not reply:
-            raise RuntimeError("Gemini returned an empty response")
-        return reply
 
     async def generate_stream(
         self,
@@ -670,6 +677,11 @@ class LMStudioProvider(LMProviderInterface):
                 "temperature": 0.7,
             }
         ).encode("utf-8")
+
+        body = await asyncio.to_thread(self._request_chat, payload)
+        return body["choices"][0]["message"]["content"]
+
+    def _request_chat(self, payload: bytes) -> dict[str, Any]:
         request = urllib.request.Request(
             f"{self.base_url}/v1/chat/completions",
             data=payload,
@@ -678,17 +690,21 @@ class LMStudioProvider(LMProviderInterface):
         )
         try:
             with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
-                body = json.loads(response.read().decode("utf-8"))
+                return json.loads(response.read().decode("utf-8"))
         except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
             raise RuntimeError(f"LM Studio request failed: {exc}") from exc
-        return body["choices"][0]["message"]["content"]
 
-    async def list_models(self) -> list[ModelInfo]:
+    def _fetch_models_body(self) -> dict[str, Any] | None:
         request = urllib.request.Request(f"{self.base_url}/v1/models", method="GET")
         try:
             with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
-                body = json.loads(response.read().decode("utf-8"))
+                return json.loads(response.read().decode("utf-8"))
         except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+            return None
+
+    async def list_models(self) -> list[ModelInfo]:
+        body = await asyncio.to_thread(self._fetch_models_body)
+        if body is None:
             return []
         return [
             ModelInfo(

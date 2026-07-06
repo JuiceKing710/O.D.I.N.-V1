@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from jarvis.backend.utils.atomic_write import atomic_write_text
+
 
 DEFAULT_SETTINGS: dict[str, Any] = {
     "voice_mode": "push_to_talk",
@@ -25,19 +27,31 @@ class SettingsStore:
     def __init__(self, path: Path) -> None:
         self.path = path
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        # The store is read on every chat turn (turbo switch, truthfulness
+        # check) and written by background loops; cache the parsed file and
+        # invalidate on mtime/size so hot reads skip disk without going stale.
+        self._cached: dict[str, Any] | None = None
+        self._cached_stamp: tuple[int, int] | None = None
 
     def read(self) -> dict[str, Any]:
-        if not self.path.exists():
+        try:
+            stat = self.path.stat()
+        except FileNotFoundError:
             return dict(DEFAULT_SETTINGS)
-        with self.path.open("r", encoding="utf-8") as handle:
-            data = json.load(handle)
-        return {**DEFAULT_SETTINGS, **data}
+        stamp = (stat.st_mtime_ns, stat.st_size)
+        if self._cached is None or stamp != self._cached_stamp:
+            with self.path.open("r", encoding="utf-8") as handle:
+                self._cached = json.load(handle)
+            self._cached_stamp = stamp
+        return {**DEFAULT_SETTINGS, **self._cached}
 
     def update(self, patch: dict[str, Any]) -> dict[str, Any]:
         settings = self.read()
         settings.update(patch)
-        with self.path.open("w", encoding="utf-8") as handle:
-            json.dump(settings, handle, indent=2, sort_keys=True)
-            handle.write("\n")
+        # Write-then-rename so a crash mid-write can never leave a truncated
+        # settings.json (which would take emergency_stop and permissions with it).
+        atomic_write_text(self.path, json.dumps(settings, indent=2, sort_keys=True) + "\n")
+        stat = self.path.stat()
+        self._cached = dict(settings)
+        self._cached_stamp = (stat.st_mtime_ns, stat.st_size)
         return settings
-

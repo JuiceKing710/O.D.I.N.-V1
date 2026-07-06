@@ -12,6 +12,12 @@ from jarvis.backend.utils.permissions import PermissionManager
 class ImageBot(Bot):
     name = "image"
     description = "Generates images from a text prompt behind a generate-images permission."
+    # Generation is slow by nature: the Gemini adapter allows 60s and a local
+    # command adapter up to 300s. The dispatch timeout must cover the slowest.
+    timeout_seconds = 310.0
+    # A timed-out generation may still be rendering (and billing) in its
+    # worker thread; retrying would kick off a second one.
+    retry_on_timeout = False
 
     # Serialize and space out generations so a cloud generator is not hammered.
     MIN_REQUEST_INTERVAL = 1.0
@@ -58,7 +64,9 @@ class ImageBot(Bot):
 
         await self._throttle()
         try:
-            path = self.image_manager.generate(prompt)
+            # Adapters call urllib/subprocess synchronously; run generation off
+            # the event loop so a 60-300s render doesn't freeze the process.
+            path = await asyncio.to_thread(self.image_manager.generate, prompt)
         except RuntimeError as exc:
             return BotResponse(ok=False, error=str(exc))
         return BotResponse(

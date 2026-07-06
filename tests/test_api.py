@@ -223,6 +223,33 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(body["conversation_id"], 1)
         self.assertIn("I heard: hello from api", body["reply"])
 
+    def test_export_conversation_returns_summary_and_messages(self) -> None:
+        response = self.client.post(
+            "/api/v1/chat",
+            json={"message": "hello export", "username": "api-user"},
+        )
+        conversation_id = response.json()["conversation_id"]
+
+        exported = self.client.get(
+            f"/api/v1/conversations/{conversation_id}/export",
+            params={"username": "api-user"},
+        )
+
+        self.assertEqual(exported.status_code, 200)
+        body = exported.json()
+        self.assertEqual(body["conversation"]["convo_id"], conversation_id)
+        # The summary comes from a direct per-conversation query, so it must
+        # count both the user message and the assistant reply.
+        self.assertEqual(body["conversation"]["message_count"], 2)
+        self.assertEqual(len(body["messages"]), 2)
+
+    def test_export_conversation_unknown_id_returns_404(self) -> None:
+        response = self.client.get(
+            "/api/v1/conversations/9999/export",
+            params={"username": "api-user"},
+        )
+        self.assertEqual(response.status_code, 404)
+
     def test_image_status_endpoint_reports_adapter(self) -> None:
         response = self.client.get("/api/v1/image/status")
         self.assertEqual(response.status_code, 200)

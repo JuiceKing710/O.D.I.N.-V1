@@ -14,6 +14,21 @@ from jarvis.backend.core.vector_store import NullVectorStore, VectorStoreInterfa
 from jarvis.backend.core.migrations import run_migrations
 
 
+def _merge_unique(primary, secondary, *, key, limit):
+    """Keep primary-then-secondary order, drop duplicates by key, cap at limit."""
+    merged = []
+    seen = set()
+    for item in [*primary, *secondary]:
+        item_key = key(item)
+        if item_key in seen:
+            continue
+        merged.append(item)
+        seen.add(item_key)
+        if len(merged) >= limit:
+            break
+    return merged
+
+
 @dataclass(slots=True)
 class UserRecord:
     user_id: int
@@ -284,6 +299,28 @@ class MemoryManager:
             raise ValueError(f"Conversation not found: {convo_id}")
         return self._conversation_from_row(row)
 
+    def get_conversation_summary(self, convo_id: int, user_id: int) -> ConversationSummaryRecord:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT
+                  c.convo_id,
+                  c.user_id,
+                  c.started_at,
+                  c.title,
+                  COUNT(m.msg_id) AS message_count,
+                  COALESCE(MAX(m.created_at), c.started_at) AS last_activity_at
+                FROM conversations c
+                LEFT JOIN messages m ON m.convo_id = c.convo_id
+                WHERE c.convo_id = ? AND c.user_id = ?
+                GROUP BY c.convo_id, c.user_id, c.started_at, c.title
+                """,
+                (convo_id, user_id),
+            ).fetchone()
+        if row is None:
+            raise ValueError(f"Conversation not found: {convo_id}")
+        return self._conversation_summary_from_row(row)
+
     def list_conversations(self, user_id: int, limit: int = 25) -> list[ConversationSummaryRecord]:
         with self._connect() as conn:
             rows = conn.execute(
@@ -441,16 +478,12 @@ class MemoryManager:
                 """,
                 (user_id, f"%{query.strip()}%", limit),
             ).fetchall()
-        merged = []
-        seen = set()
-        for document in [*vector_records, *(self._document_from_row(row) for row in rows)]:
-            if document.document_id in seen:
-                continue
-            merged.append(document)
-            seen.add(document.document_id)
-            if len(merged) >= limit:
-                break
-        return merged
+        return _merge_unique(
+            vector_records,
+            [self._document_from_row(row) for row in rows],
+            key=lambda document: document.document_id,
+            limit=limit,
+        )
 
     def query_context(self, user_id: int, query: str, limit: int = 5) -> list[str]:
         messages = self.query_messages(user_id, query, limit)
@@ -1090,16 +1123,7 @@ class MemoryManager:
     def _merge_messages(
         primary: list[MessageRecord], secondary: list[MessageRecord], limit: int
     ) -> list[MessageRecord]:
-        merged = []
-        seen = set()
-        for message in [*primary, *secondary]:
-            if message.msg_id in seen:
-                continue
-            merged.append(message)
-            seen.add(message.msg_id)
-            if len(merged) >= limit:
-                break
-        return merged
+        return _merge_unique(primary, secondary, key=lambda message: message.msg_id, limit=limit)
 
     def _safe_upsert_message(self, message: MessageRecord) -> str | None:
         if not self.vector_store.enabled:
@@ -1156,7 +1180,10 @@ class MemoryManager:
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
         with self.db_lock:
-            conn = sqlite3.connect(self.db_path)
+            # busy_timeout covers writers outside this process lock (e.g. a
+            # backup restore or manual sqlite3 session) instead of failing
+            # immediately with "database is locked".
+            conn = sqlite3.connect(self.db_path, timeout=5)
             conn.row_factory = sqlite3.Row
             conn.execute("PRAGMA foreign_keys = ON")
             try:
