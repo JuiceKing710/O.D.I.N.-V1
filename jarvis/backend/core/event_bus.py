@@ -28,24 +28,42 @@ class EventBus:
         self.history_size = history_size
         self._subscribers: set[asyncio.Queue[Event]] = set()
         self._history: list[Event] = []
+        # The loop that publish/subscribe last ran on. Blocking bot work now
+        # runs in worker threads (asyncio.to_thread) and still publishes state
+        # events; asyncio.Queue is not thread-safe, so off-loop publishers must
+        # marshal delivery back onto this loop.
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     def publish(
         self, event_type: str, payload: dict[str, Any], *, transient: bool = False
     ) -> Event:
         event = Event(type=event_type, payload=payload)
+        try:
+            self._loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # Called from a worker thread (or a loop-less test). Hand delivery
+            # to the loop when one is live; otherwise deliver inline.
+            loop = self._loop
+            if loop is not None and loop.is_running():
+                loop.call_soon_threadsafe(self._deliver, event, transient)
+                return event
+        self._deliver(event, transient)
+        return event
+
+    def _deliver(self, event: Event, transient: bool) -> None:
         if not transient:
             self._history.append(event)
             if len(self._history) > self.history_size:
                 self._history = self._history[-self.history_size :]
         for subscriber in list(self._subscribers):
             subscriber.put_nowait(event)
-        return event
 
     def history(self) -> list[Event]:
         return list(self._history)
 
     async def subscribe(self) -> asyncio.Queue[Event]:
         queue: asyncio.Queue[Event] = asyncio.Queue()
+        self._loop = asyncio.get_running_loop()
         self._subscribers.add(queue)
         return queue
 

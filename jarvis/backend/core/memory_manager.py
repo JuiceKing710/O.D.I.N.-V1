@@ -299,6 +299,28 @@ class MemoryManager:
             raise ValueError(f"Conversation not found: {convo_id}")
         return self._conversation_from_row(row)
 
+    def get_conversation_summary(self, convo_id: int, user_id: int) -> ConversationSummaryRecord:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT
+                  c.convo_id,
+                  c.user_id,
+                  c.started_at,
+                  c.title,
+                  COUNT(m.msg_id) AS message_count,
+                  COALESCE(MAX(m.created_at), c.started_at) AS last_activity_at
+                FROM conversations c
+                LEFT JOIN messages m ON m.convo_id = c.convo_id
+                WHERE c.convo_id = ? AND c.user_id = ?
+                GROUP BY c.convo_id, c.user_id, c.started_at, c.title
+                """,
+                (convo_id, user_id),
+            ).fetchone()
+        if row is None:
+            raise ValueError(f"Conversation not found: {convo_id}")
+        return self._conversation_summary_from_row(row)
+
     def list_conversations(self, user_id: int, limit: int = 25) -> list[ConversationSummaryRecord]:
         with self._connect() as conn:
             rows = conn.execute(

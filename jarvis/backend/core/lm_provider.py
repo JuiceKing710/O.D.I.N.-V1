@@ -678,32 +678,32 @@ class LMStudioProvider(LMProviderInterface):
             }
         ).encode("utf-8")
 
-        def _call() -> dict[str, Any]:
-            request = urllib.request.Request(
-                f"{self.base_url}/v1/chat/completions",
-                data=payload,
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
-            try:
-                with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
-                    return json.loads(response.read().decode("utf-8"))
-            except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
-                raise RuntimeError(f"LM Studio request failed: {exc}") from exc
-
-        body = await asyncio.to_thread(_call)
+        body = await asyncio.to_thread(self._request_chat, payload)
         return body["choices"][0]["message"]["content"]
 
-    async def list_models(self) -> list[ModelInfo]:
-        def _call() -> dict[str, Any] | None:
-            request = urllib.request.Request(f"{self.base_url}/v1/models", method="GET")
-            try:
-                with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
-                    return json.loads(response.read().decode("utf-8"))
-            except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
-                return None
+    def _request_chat(self, payload: bytes) -> dict[str, Any]:
+        request = urllib.request.Request(
+            f"{self.base_url}/v1/chat/completions",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+            raise RuntimeError(f"LM Studio request failed: {exc}") from exc
 
-        body = await asyncio.to_thread(_call)
+    def _fetch_models_body(self) -> dict[str, Any] | None:
+        request = urllib.request.Request(f"{self.base_url}/v1/models", method="GET")
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+            return None
+
+    async def list_models(self) -> list[ModelInfo]:
+        body = await asyncio.to_thread(self._fetch_models_body)
         if body is None:
             return []
         return [

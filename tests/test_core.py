@@ -795,6 +795,45 @@ class CoreTests(unittest.TestCase):
         self.assertFalse(response.ok)
         self.assertEqual(bot.attempts, 2)
 
+    def test_side_effect_bot_timeout_does_not_retry(self) -> None:
+        manager = BotManager(
+            self.permissions,
+            self.audit,
+            timeout_seconds=0.01,
+            retry_count=1,
+        )
+        bot = SlowBot(self.permissions, self.audit)
+        # A timeout cannot cancel the worker thread the action runs on, so
+        # side-effectful bots opt out of retries to avoid double execution.
+        bot.retry_on_timeout = False
+        manager.register(bot)
+
+        response = asyncio.run(
+            manager.dispatch(BotMessage(sender="tester", recipient="slow", action="wait"))
+        )
+
+        self.assertIsNotNone(response)
+        self.assertFalse(response.ok)
+        self.assertEqual(bot.attempts, 1)
+
+    def test_event_bus_publish_from_worker_thread_delivers_on_loop(self) -> None:
+        from jarvis.backend.core.event_bus import EventBus
+
+        bus = EventBus()
+
+        async def run() -> tuple[object, int]:
+            queue = await bus.subscribe()
+            # Publish exactly the way to_thread'd bot work does: from a worker
+            # thread with no running loop. Delivery must marshal to this loop.
+            await asyncio.to_thread(bus.publish, "bot.status", {"status": "ok"})
+            event = await asyncio.wait_for(queue.get(), timeout=2)
+            return event, len(bus.history())
+
+        event, history_size = asyncio.run(run())
+
+        self.assertEqual(event.type, "bot.status")
+        self.assertEqual(history_size, 1)
+
     def test_voice_interruption_hysteresis(self) -> None:
         voice = VoiceManager(InterruptionConfig(energy_threshold=0.5, hold_frames=2, release_frames=2))
         voice.transition(VoiceState.SPEAKING)

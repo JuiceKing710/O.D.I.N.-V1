@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import json
-import os
-import tempfile
 from pathlib import Path
 from typing import Any
+
+from jarvis.backend.utils.atomic_write import atomic_write_text
 
 
 DEFAULT_SETTINGS: dict[str, Any] = {
@@ -50,15 +50,7 @@ class SettingsStore:
         settings.update(patch)
         # Write-then-rename so a crash mid-write can never leave a truncated
         # settings.json (which would take emergency_stop and permissions with it).
-        fd, temp_name = tempfile.mkstemp(dir=self.path.parent, suffix=".tmp")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                json.dump(settings, handle, indent=2, sort_keys=True)
-                handle.write("\n")
-            os.replace(temp_name, self.path)
-        except BaseException:
-            Path(temp_name).unlink(missing_ok=True)
-            raise
+        atomic_write_text(self.path, json.dumps(settings, indent=2, sort_keys=True) + "\n")
         stat = self.path.stat()
         self._cached = dict(settings)
         self._cached_stamp = (stat.st_mtime_ns, stat.st_size)

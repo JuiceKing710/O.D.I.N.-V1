@@ -15,6 +15,9 @@ class ImageBot(Bot):
     # Generation is slow by nature: the Gemini adapter allows 60s and a local
     # command adapter up to 300s. The dispatch timeout must cover the slowest.
     timeout_seconds = 310.0
+    # A timed-out generation may still be rendering (and billing) in its
+    # worker thread; retrying would kick off a second one.
+    retry_on_timeout = False
 
     # Serialize and space out generations so a cloud generator is not hammered.
     MIN_REQUEST_INTERVAL = 1.0

@@ -105,7 +105,7 @@ class BotManager:
         timeout_seconds = (
             bot.timeout_seconds if bot.timeout_seconds is not None else self.timeout_seconds
         )
-        attempts = self.retry_count + 1
+        attempts = (self.retry_count + 1) if bot.retry_on_timeout else 1
         for attempt in range(1, attempts + 1):
             try:
                 response = await asyncio.wait_for(bot.on_request(request), timeout_seconds)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import asyncio
 from pathlib import Path
 
 from jarvis.backend.bots.base import Bot, BotRequest, BotResponse
@@ -9,6 +10,9 @@ from jarvis.backend.bots.base import Bot, BotRequest, BotResponse
 class CodeBot(Bot):
     name = "code"
     description = "Analyzes code-related requests without executing generated code."
+    # Reading and AST-parsing a large source file can stall on slow storage;
+    # give it headroom beyond the 10s default.
+    timeout_seconds = 30.0
 
     async def on_request(self, request: BotRequest) -> BotResponse:
         if request.action != "analyze":
@@ -25,7 +29,11 @@ class CodeBot(Bot):
             )
         except PermissionError as exc:
             return self.permission_response(exc)
+        # File read + parse runs off the event loop like the other bots' blocking work.
+        return await asyncio.to_thread(self._analyze, raw_path)
 
+    @staticmethod
+    def _analyze(raw_path: str) -> BotResponse:
         path = Path(raw_path).expanduser()
         if not path.is_file():
             return BotResponse(ok=False, error=f"Code file does not exist: {path}")

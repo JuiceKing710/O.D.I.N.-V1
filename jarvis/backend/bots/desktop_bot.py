@@ -29,7 +29,10 @@ class DesktopBot(Bot):
 
     TIMEOUT_SECONDS = 30.0
     # Dispatch must outlive the osascript timeout above, with margin.
-    timeout_seconds = 35.0
+    timeout_seconds = TIMEOUT_SECONDS + 5.0
+    # AppleScript actions change app state; never re-run one whose first
+    # attempt may still be executing in its worker thread.
+    retry_on_timeout = False
 
     def __init__(
         self,

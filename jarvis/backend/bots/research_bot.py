@@ -38,10 +38,12 @@ def _html_to_text(body: str) -> str:
 class ResearchBot(Bot):
     name = "research"
     description = "Coordinates external lookup and page fetches behind network permissions."
-    # A page fetch may take up to 20s plus the throttle gap; the dispatch
-    # timeout must cover it now that network I/O runs off the event loop
-    # (a blocked loop used to mask the default 10s timeout entirely).
-    timeout_seconds = 25.0
+    SEARCH_TIMEOUT_SECONDS = 15.0
+    FETCH_TIMEOUT_SECONDS = 20.0
+    # The dispatch timeout must cover the slowest fetch plus the throttle gap
+    # now that network I/O runs off the event loop (a blocked loop used to
+    # mask the default 10s timeout entirely).
+    timeout_seconds = FETCH_TIMEOUT_SECONDS + 5.0
 
     # Basic per-process rate limit: serialize requests and keep a minimum gap so
     # Odin does not hammer external services.
@@ -94,7 +96,9 @@ class ResearchBot(Bot):
         try:
             # urllib is blocking; run it off the event loop so a slow search
             # (up to 15s) doesn't stall every other request in the process.
-            body = await asyncio.to_thread(self._http_get_text, url, 15)
+            body = await asyncio.to_thread(
+                self._http_get_text, url, self.SEARCH_TIMEOUT_SECONDS
+            )
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
             return BotResponse(ok=False, error=f"Research lookup failed: {exc}")
 
@@ -133,7 +137,9 @@ class ResearchBot(Bot):
             return self.permission_response(exc)
         await self._throttle()
         try:
-            content_type, raw = await asyncio.to_thread(self._http_get_page, url, 20)
+            content_type, raw = await asyncio.to_thread(
+                self._http_get_page, url, self.FETCH_TIMEOUT_SECONDS
+            )
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
             return BotResponse(ok=False, error=f"Page fetch failed: {exc}")
         if content_type and "html" not in content_type and not content_type.startswith("text/"):

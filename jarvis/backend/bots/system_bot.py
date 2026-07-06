@@ -14,6 +14,9 @@ class SystemBot(Bot):
     # Commands may legitimately run up to their 120s subprocess cap; the
     # dispatch timeout must outlive it or every long command dies at dispatch.
     timeout_seconds = 130.0
+    # A dispatch timeout cannot kill the subprocess already running in its
+    # worker thread; retrying would execute the same shell command twice.
+    retry_on_timeout = False
 
     async def on_request(self, request: BotRequest) -> BotResponse:
         if request.action != "execute":

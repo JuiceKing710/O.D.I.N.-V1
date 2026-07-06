@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import tempfile
 from pathlib import Path
@@ -13,6 +14,12 @@ MAX_WRITE_BYTES = 1_000_000
 class FileBot(Bot):
     name = "file"
     description = "Handles constrained file read, write, and undo tasks."
+    # Reads, snapshots, and atomic writes can stall on slow volumes (network
+    # mounts, spun-down disks); give them headroom beyond the 10s default.
+    timeout_seconds = 30.0
+    # A write's worker thread survives a dispatch timeout; retrying could
+    # replay the write (and take a second snapshot) while the first runs.
+    retry_on_timeout = False
 
     def __init__(
         self,
@@ -39,10 +46,8 @@ class FileBot(Bot):
                     reason=f"Read file: {raw_path}",
                     metadata=self.permission_metadata(request),
                 )
-                path = Path(raw_path).expanduser()
-                if not path.is_file():
-                    return BotResponse(ok=False, error="File does not exist")
-                return BotResponse(ok=True, payload={"text": path.read_text(encoding="utf-8")[:8000]})
+                # Disk I/O runs off the event loop like the other bots' blocking work.
+                return await asyncio.to_thread(self._read_file, raw_path)
             except PermissionError as exc:
                 return self.permission_response(exc)
             except (OSError, UnicodeDecodeError) as exc:
@@ -58,12 +63,7 @@ class FileBot(Bot):
                         reason=f"Write file: {path}",
                         metadata=self.permission_metadata(request),
                     )
-                # Snapshot the prior state before overwriting so the edit can be
-                # undone. None means rollback is disabled or the file is too big.
-                undoable = False
-                if self.snapshot_store is not None:
-                    undoable = self.snapshot_store.snapshot(path) is not None
-                self._atomic_write(path, content)
+                undoable = await asyncio.to_thread(self._snapshot_and_write, path, content)
                 return BotResponse(
                     ok=True,
                     payload={
@@ -78,10 +78,26 @@ class FileBot(Bot):
             except (OSError, UnicodeEncodeError, ValueError) as exc:
                 return BotResponse(ok=False, error=str(exc))
         if request.action == "restore":
-            return self._restore(request)
+            return await self._restore(request)
         return BotResponse(ok=False, error=f"Unsupported file action: {request.action}")
 
-    def _restore(self, request: BotRequest) -> BotResponse:
+    @staticmethod
+    def _read_file(raw_path: str) -> BotResponse:
+        path = Path(raw_path).expanduser()
+        if not path.is_file():
+            return BotResponse(ok=False, error="File does not exist")
+        return BotResponse(ok=True, payload={"text": path.read_text(encoding="utf-8")[:8000]})
+
+    def _snapshot_and_write(self, path: Path, content: str) -> bool:
+        # Snapshot the prior state before overwriting so the edit can be
+        # undone. None means rollback is disabled or the file is too big.
+        undoable = False
+        if self.snapshot_store is not None:
+            undoable = self.snapshot_store.snapshot(path) is not None
+        self._atomic_write(path, content)
+        return undoable
+
+    async def _restore(self, request: BotRequest) -> BotResponse:
         if self.snapshot_store is None:
             return BotResponse(ok=False, error="File rollback is not enabled")
         raw_path = str(request.payload.get("text") or request.payload.get("path") or "").strip()
@@ -98,7 +114,7 @@ class FileBot(Bot):
                     reason=f"Undo edit to file: {path}",
                     metadata=self.permission_metadata(request),
                 )
-            if not self.snapshot_store.restore(path):
+            if not await asyncio.to_thread(self.snapshot_store.restore, path):
                 return BotResponse(ok=False, error=f"No snapshot to undo for {path}")
             return BotResponse(
                 ok=True,
