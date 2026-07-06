@@ -29,6 +29,11 @@
       "name": "control_desktop",
       "description": "Control native macOS apps (activate, type, click menus).",
       "default": "prompt"
+    },
+    {
+      "name": "observe_screen",
+      "description": "Capture the screen for on-device visual analysis.",
+      "default": "prompt"
     }
   ]
 }

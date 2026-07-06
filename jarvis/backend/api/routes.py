@@ -66,7 +66,10 @@ from jarvis.backend.api.models import (
     TaskUpdateRequest,
     VisionAnalyzeRequest,
     VisionAnalyzeResponse,
+    VisionScreenRequest,
     VisionStatusResponse,
+    VoiceModelInfo,
+    VoiceModelsResponse,
     VoiceStateRequest,
     VoiceStatusResponse,
     VoiceSynthesizeRequest,
@@ -110,11 +113,19 @@ from jarvis.backend.core.recovery_manager import RecoveryManager
 from jarvis.backend.core.safety_switch import SafetySwitch
 from jarvis.backend.core.settings_store import SettingsStore
 from jarvis.backend.core.system_monitor import SystemMonitor
-from jarvis.backend.core.vision_manager import VisionManager
+from jarvis.backend.core.vision_manager import (
+    DEFAULT_SCREEN_PROMPT,
+    VisionManager,
+    capture_screen,
+)
 from jarvis.backend.core.voice_manager import VoiceManager, VoiceState
 from jarvis.backend.utils.reflection import ReflectionEngine
 from jarvis.backend.utils.audit_logging import AuditLogger
-from jarvis.backend.utils.permissions import PermissionDecision, PermissionManager
+from jarvis.backend.utils.permissions import (
+    PermissionApprovalRequired,
+    PermissionDecision,
+    PermissionManager,
+)
 
 router = APIRouter(prefix="/api/v1")
 WHISPER_MODEL_URL = (
@@ -906,6 +917,57 @@ def setup_voice_model(voice_manager: VoiceManager = Depends(get_voice_manager)) 
     return VoiceSetupResponse(configured=True, model_path=str(model_path))
 
 
+def _voice_models_response(voice_manager: VoiceManager) -> VoiceModelsResponse:
+    adapter = voice_manager.stt_adapter
+    model_path = getattr(adapter, "model_path", None)
+    if model_path is None:
+        raise HTTPException(status_code=503, detail="Local whisper-cli is not in use")
+    active = Path(model_path)
+    models = [
+        VoiceModelInfo(
+            name=candidate.name,
+            size_bytes=candidate.stat().st_size,
+            active=candidate.name == active.name,
+        )
+        for candidate in sorted(active.parent.glob("ggml-*.bin"))
+        # Anything under 1 MB is a failed/partial download, not a usable model.
+        if candidate.is_file() and candidate.stat().st_size > 1_000_000
+    ]
+    return VoiceModelsResponse(
+        models=models,
+        active=active.name if active.is_file() else None,
+        gpu_enabled=getattr(adapter, "use_gpu", None),
+    )
+
+
+@router.get("/voice/models", response_model=VoiceModelsResponse)
+def list_voice_models(
+    voice_manager: VoiceManager = Depends(get_voice_manager),
+) -> VoiceModelsResponse:
+    return _voice_models_response(voice_manager)
+
+
+@router.post("/voice/models/load", response_model=VoiceModelsResponse)
+def load_voice_model(
+    request: ModelLoadRequest,
+    voice_manager: VoiceManager = Depends(get_voice_manager),
+    settings: SettingsStore = Depends(get_settings_store),
+) -> VoiceModelsResponse:
+    adapter = voice_manager.stt_adapter
+    model_path = getattr(adapter, "model_path", None)
+    if model_path is None:
+        raise HTTPException(status_code=503, detail="Local whisper-cli is not in use")
+    name = request.model_name.strip()
+    if not name or Path(name).name != name:
+        raise HTTPException(status_code=400, detail="Model name must be a bare filename")
+    target = Path(model_path).parent / name
+    if not target.is_file() or target.stat().st_size <= 1_000_000:
+        raise HTTPException(status_code=404, detail=f"Whisper model not found: {name}")
+    adapter.model_path = target
+    settings.update({"whisper_model": name})
+    return _voice_models_response(voice_manager)
+
+
 @router.post("/voice/state", response_model=VoiceStatusResponse)
 def update_voice_state(
     request: VoiceStateRequest,
@@ -1007,6 +1069,50 @@ def analyze_vision(
             raise HTTPException(status_code=400, detail="image_base64 or image_path is required")
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return VisionAnalyzeResponse(
+        description=description,
+        state=vision_manager.status().state.value,
+    )
+
+
+@router.post("/vision/screen", response_model=VisionAnalyzeResponse)
+def analyze_screen(
+    request: VisionScreenRequest,
+    vision_manager: VisionManager = Depends(get_vision_manager),
+    permission_manager: PermissionManager = Depends(get_permission_manager),
+    audit_logger: AuditLogger = Depends(get_audit_logger),
+) -> VisionAnalyzeResponse:
+    """Capture the screen and describe it — master spec §6 screen awareness.
+
+    Gated behind the `observe_screen` permission (prompt by default) and audit
+    logged like every other sensitive host operation."""
+    try:
+        permission_manager.require_allowed(
+            "observe_screen",
+            actor="user",
+            reason="Analyze the current screen",
+        )
+    except PermissionApprovalRequired as exc:
+        audit_logger.log("vision", "screen_capture", "approval_required")
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "message": "Screen capture needs approval — check pending permissions.",
+                "permission_request": exc.request.to_api(),
+            },
+        ) from exc
+    except PermissionError as exc:
+        audit_logger.log("vision", "screen_capture", "denied")
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    try:
+        image = capture_screen()
+        description = vision_manager.analyze_image(
+            image, ".jpg", request.prompt or DEFAULT_SCREEN_PROMPT
+        )
+    except RuntimeError as exc:
+        audit_logger.log("vision", "screen_capture", "error", {"error": str(exc)})
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    audit_logger.log("vision", "screen_capture", "ok")
     return VisionAnalyzeResponse(
         description=description,
         state=vision_manager.status().state.value,

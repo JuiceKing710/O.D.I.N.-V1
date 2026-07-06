@@ -118,14 +118,40 @@ class WhisperCommandSpeechToTextAdapter:
 class WhisperCliSpeechToTextAdapter:
     name = "whisper-cli"
 
-    def __init__(self, executable: str, model_path: Path | str, ffmpeg_executable: str) -> None:
+    def __init__(
+        self,
+        executable: str,
+        model_path: Path | str,
+        ffmpeg_executable: str,
+        use_gpu: bool = True,
+    ) -> None:
         self.executable = executable
         self.model_path = Path(model_path)
         self.ffmpeg_executable = ffmpeg_executable
+        # On Apple Silicon, Metal roughly halves transcription latency and moves
+        # the work off the CPU cores. Disabled via JARVIS_WHISPER_GPU for hosts
+        # where GPU init is unreliable or unified memory is too tight.
+        self.use_gpu = use_gpu
 
     @property
     def configured(self) -> bool:
         return self.model_path.is_file() and self.model_path.stat().st_size > 1_000_000
+
+    def transcribe_command(self, wav_path: Path) -> list[str]:
+        command = [
+            self.executable,
+            "-m",
+            str(self.model_path),
+            "-f",
+            str(wav_path),
+            "-np",
+            "-nt",
+            "-l",
+            "en",
+        ]
+        if not self.use_gpu:
+            command.append("-ng")
+        return command
 
     def transcribe(self, audio_path: Path) -> str:
         if not self.configured:
@@ -167,18 +193,7 @@ class WhisperCliSpeechToTextAdapter:
                     "O.D.I.N. has microphone access in System Settings."
                 )
             result = subprocess.run(
-                [
-                    self.executable,
-                    "-m",
-                    str(self.model_path),
-                    "-f",
-                    str(wav_path),
-                    "-np",
-                    "-nt",
-                    "-ng",
-                    "-l",
-                    "en",
-                ],
+                self.transcribe_command(wav_path),
                 capture_output=True,
                 check=False,
                 text=True,

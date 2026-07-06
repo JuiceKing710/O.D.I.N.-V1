@@ -238,16 +238,29 @@ def get_voice_manager() -> VoiceManager:
     tts_command = os.environ.get("JARVIS_TTS_COMMAND")
     whisper_cli = shutil.which("whisper-cli")
     ffmpeg = shutil.which("ffmpeg")
-    whisper_model = Path(
-        os.environ.get(
-            "JARVIS_WHISPER_MODEL",
-            str(Path.home() / "jarvis-models" / "ggml-base.en.bin"),
-        )
+    # Model resolution priority: explicit env path, then the model picked in
+    # Settings (a bare filename inside the models dir), then the small default.
+    models_dir = Path(
+        os.environ.get("JARVIS_WHISPER_MODEL_DIR", str(Path.home() / "jarvis-models"))
     )
+    settings_model = Path(
+        str(get_settings_store().read().get("whisper_model") or "").strip()
+    ).name
+    whisper_model = Path(
+        os.environ.get("JARVIS_WHISPER_MODEL")
+        or str(models_dir / (settings_model or "ggml-base.en.bin"))
+    )
+    whisper_gpu = os.environ.get("JARVIS_WHISPER_GPU", "enabled").lower() not in {
+        "0",
+        "false",
+        "disabled",
+    }
     if stt_command:
         stt_adapter = WhisperCommandSpeechToTextAdapter(stt_command)
     elif whisper_cli and ffmpeg:
-        stt_adapter = WhisperCliSpeechToTextAdapter(whisper_cli, whisper_model, ffmpeg)
+        stt_adapter = WhisperCliSpeechToTextAdapter(
+            whisper_cli, whisper_model, ffmpeg, use_gpu=whisper_gpu
+        )
     else:
         stt_adapter = UnconfiguredSpeechToTextAdapter()
     piper_binary = shutil.which("piper") or _venv_binary("piper")
@@ -279,17 +292,23 @@ def get_vision_manager() -> VisionManager:
     settings = get_settings_store().read()
     gemini_key = str(settings.get("gemini_api_key") or "").strip()
     # Local-first: prefer the on-device Ollama vision model so camera frames
-    # never leave the machine and stay fast on modest hardware. moondream (~1.6 GB)
-    # is the default because it runs comfortably offline on an 8 GB Mac; a heavier
-    # model like llava is used only if moondream is not installed. Fall back to
-    # Gemini just when no local model is present and turbo mode is enabled.
+    # never leave the machine and stay fast on modest hardware. qwen3.5 small
+    # multimodal models are preferred when installed (0.8b is the fastest and
+    # lightest, 2b the best quality per GB), then moondream (~1.7 GB), then the
+    # larger fallbacks. Only installed models are considered, so the order just
+    # decides among what is already pulled.
+    # Fall back to Gemini when no local model is present and turbo mode is on.
     # JARVIS_VISION_PROVIDER lets a low-RAM machine outsource vision to the cloud:
-    #   "cloud" -> always use Gemini (skip the ~1.7 GB local model, save RAM)
+    #   "cloud" -> always use Gemini (skip the local model, save RAM)
     #   "local" -> only ever use a local model (never send frames off-device)
     #   "auto"  -> local-first with Gemini fallback (default)
     provider_pref = os.environ.get("JARVIS_VISION_PROVIDER", "auto").strip().lower()
     preferred = os.environ.get("JARVIS_VISION_MODEL")
-    candidates = [preferred] if preferred else ["moondream", "llava"]
+    candidates = (
+        [preferred]
+        if preferred
+        else ["qwen3.5:0.8b", "qwen3.5:2b", "moondream", "llava"]
+    )
     local_model = (
         None
         if provider_pref == "cloud"
@@ -301,7 +320,13 @@ def get_vision_manager() -> VisionManager:
     if vision_command:
         adapter = CommandVisionAdapter(vision_command)
     elif local_model:
-        adapter = OllamaVisionAdapter(model=local_model, base_url=ollama_base_url)
+        # Evict the VLM immediately after each analysis by default: on an 8 GB
+        # machine the chat model owns the RAM and vision runs occasionally.
+        adapter = OllamaVisionAdapter(
+            model=local_model,
+            base_url=ollama_base_url,
+            keep_alive=os.environ.get("JARVIS_VISION_KEEP_ALIVE", "0").strip() or "0",
+        )
     elif provider_pref != "local" and settings.get("turbo_mode") and gemini_key:
         adapter = GeminiVisionAdapter(
             api_key=gemini_key,

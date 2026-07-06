@@ -91,6 +91,26 @@ Jarvis defaults to `~/jarvis-models/ggml-base.en.bin` for local Whisper input. O
 `JARVIS_WHISPER_MODEL`, or use Settings → Voice → Set up local speech model to download a
 compatible model. The Electron app requests macOS microphone access on first use.
 
+Whisper runs on the Metal GPU by default (about 2× faster than CPU on Apple Silicon and it
+frees the CPU cores); set `JARVIS_WHISPER_GPU=disabled` to force CPU. Every valid `ggml-*.bin`
+model in `~/jarvis-models` (override the dir with `JARVIS_WHISPER_MODEL_DIR`) appears in the
+Settings → Voice speech-model picker and can be switched live — the choice persists in
+`data/settings.json`. Measured on an M2 Air with an 8.7 s command clip: `base.en` ≈ 1.1 s,
+`large-v3-turbo-q5_0` ≈ 2.6 s warm. base.en stays the default because voice commands are
+latency-sensitive; pick turbo for dictation accuracy. A wake-word-triggered streaming capture
+mode was evaluated and deliberately not built: the measured round trip is already ~2–3 s and an
+always-resident streaming process would hold RAM the models need.
+
+Camera and screen vision run through local Ollama models. Auto-selection prefers
+`qwen3.5:0.8b` (fastest verified small VLM, ~2 s per frame warm), then `qwen3.5:2b`, then
+`moondream`/`llava`; override with `JARVIS_VISION_MODEL`. The vision model is evicted from RAM
+immediately after each analysis (`JARVIS_VISION_KEEP_ALIVE`, default `0`) so the chat model
+keeps the memory, and thinking mode is disabled per frame for latency. The Chat view's
+**Screen** button captures the display (`POST /api/v1/vision/screen`) and describes it — gated
+behind the `observe_screen` permission (one-time approval in Settings), audit logged, and
+requiring macOS Screen Recording access for the backend process in System Settings →
+Privacy & Security on first use.
+
 Jarvis recognizes explicit natural-language actions such as `research local assistants`,
 `analyze code path/to/file.py`, `read file notes.txt`, and `run command date`. Slash commands
 remain available as `/<bot> <action> [text]`. Permissions set to `prompt` create a pending

@@ -9,8 +9,10 @@ import {
   getAuthToken,
   fetchPermissionRequests,
   fetchRecoveryBackups,
+  fetchVoiceModels,
   fetchVoiceStatus,
   loadModel,
+  loadVoiceModel,
   resolveMediaUrl,
   resolvePermissionRequest,
   restoreRecoveryBackup,
@@ -47,6 +49,8 @@ export function SettingsPanel() {
   const [imageStatus, setImageStatus] = useState(null);
   const [voiceTesting, setVoiceTesting] = useState(false);
   const [voiceSetupLoading, setVoiceSetupLoading] = useState(false);
+  const [voiceModels, setVoiceModels] = useState(null);
+  const [voiceModelLoading, setVoiceModelLoading] = useState(false);
   const [voiceModeDraft, setVoiceModeDraft] = useState("push_to_talk");
   const { refreshSettings, saveSettings, settings, settingsError, settingsLoading } =
     useAppState();
@@ -86,6 +90,15 @@ export function SettingsPanel() {
         if (!cancelled) {
           setError(err.message);
         }
+      });
+    fetchVoiceModels()
+      .then((response) => {
+        if (!cancelled) {
+          setVoiceModels(response);
+        }
+      })
+      .catch(() => {
+        // Model switching is only offered when local whisper-cli is in use.
       });
     fetchImageStatus()
       .then((status) => {
@@ -316,6 +329,24 @@ export function SettingsPanel() {
       setError(err.message);
     } finally {
       setVoiceSetupLoading(false);
+    }
+  }
+
+  async function handleVoiceModelChange(modelName) {
+    if (!modelName || modelName === voiceModels?.active) {
+      return;
+    }
+    setVoiceModelLoading(true);
+    setSaveNotice("");
+    setError("");
+    try {
+      setVoiceModels(await loadVoiceModel(modelName));
+      setVoiceStatus(await fetchVoiceStatus());
+      setSaveNotice(`Speech model switched to ${modelName}.`);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setVoiceModelLoading(false);
     }
   }
 
@@ -673,11 +704,32 @@ ollama pull llama3.2`}</pre>
                     {voiceStatus.stt_adapter} ·{" "}
                     {voiceStatus.stt_configured ? "configured" : "not configured"}
                   </dd>
-                  {voiceStatus.stt_detail && (
+                  {voiceModels?.models?.length ? (
                     <>
                       <dt>Speech model</dt>
-                      <dd>{voiceStatus.stt_detail}</dd>
+                      <dd>
+                        <select
+                          value={voiceModels.active || ""}
+                          disabled={voiceModelLoading}
+                          onChange={(event) => handleVoiceModelChange(event.target.value)}
+                        >
+                          {voiceModels.models.map((model) => (
+                            <option key={model.name} value={model.name}>
+                              {model.name} ({Math.round(model.size_bytes / 1_000_000)} MB)
+                            </option>
+                          ))}
+                        </select>
+                        {voiceModels.gpu_enabled != null &&
+                          ` · ${voiceModels.gpu_enabled ? "Metal GPU" : "CPU"}`}
+                      </dd>
                     </>
+                  ) : (
+                    voiceStatus.stt_detail && (
+                      <>
+                        <dt>Speech model</dt>
+                        <dd>{voiceStatus.stt_detail}</dd>
+                      </>
+                    )
                   )}
                   <dt>Text to speech</dt>
                   <dd>

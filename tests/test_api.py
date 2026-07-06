@@ -26,6 +26,7 @@ from jarvis.backend.bots.file_bot import FileBot
 from jarvis.backend.bots.image_bot import ImageBot
 from jarvis.backend.bots.system_bot import SystemBot
 from jarvis.backend.core.app_factory import (
+    get_audit_logger,
     get_backup_scheduler,
     get_core,
     get_event_bus,
@@ -128,6 +129,9 @@ class ApiTests(unittest.TestCase):
                 "generate_images": Permission(
                     "generate_images", "generate images", PermissionDecision.PROMPT
                 ),
+                "observe_screen": Permission(
+                    "observe_screen", "capture the screen", PermissionDecision.PROMPT
+                ),
             }
         )
         self.permission_manager = permission_manager
@@ -198,6 +202,9 @@ class ApiTests(unittest.TestCase):
             event_bus=self.event_bus,
         )
         app.dependency_overrides[get_improvement_manager] = lambda: self.improvements
+        # Without this override, routes that audit-log write to the real
+        # data/audit.log during tests.
+        app.dependency_overrides[get_audit_logger] = lambda: audit_logger
         app.dependency_overrides[get_event_bus] = lambda: self.event_bus
         app.dependency_overrides[get_permission_manager] = lambda: self.permission_manager
         app.dependency_overrides[get_recovery_manager] = lambda: self.recovery
@@ -874,6 +881,38 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["description"], "saw a smiling face")
 
+    def test_vision_screen_gated_behind_permission_and_audited(self) -> None:
+        self.vision.adapter = FakeVisionAdapter()
+
+        # First call: permission is "prompt" -> approval required, no capture.
+        response = self.client.post("/api/v1/vision/screen", json={})
+        self.assertEqual(response.status_code, 403)
+        detail = response.json()["detail"]
+        request_id = detail["permission_request"]["request_id"]
+
+        resolve = self.client.post(
+            f"/api/v1/permissions/requests/{request_id}/resolve",
+            json={"decision": "allowed"},
+        )
+        self.assertEqual(resolve.status_code, 200)
+
+        # Second call: one-time grant consumed, screen captured and analyzed.
+        with patch(
+            "jarvis.backend.api.routes.capture_screen", return_value=b"the screen"
+        ):
+            response = self.client.post("/api/v1/vision/screen", json={})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["description"], "saw the screen")
+
+    def test_vision_screen_denied_permission_returns_403(self) -> None:
+        self.vision.adapter = FakeVisionAdapter()
+        self.permission_manager.update_decisions({"observe_screen": "denied"})
+
+        response = self.client.post("/api/v1/vision/screen", json={})
+
+        self.assertEqual(response.status_code, 403)
+        self.assertIn("denied", response.json()["detail"])
+
     def test_vision_analyze_rejects_invalid_base64(self) -> None:
         self.vision.adapter = FakeVisionAdapter()
 
@@ -934,6 +973,62 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()["configured"])
         self.assertTrue(model_path.is_file())
+
+    def test_voice_models_lists_valid_models_and_loads_selection(self) -> None:
+        models_dir = Path(self.tmp.name) / "models"
+        models_dir.mkdir()
+        active = models_dir / "ggml-base.en.bin"
+        turbo = models_dir / "ggml-large-v3-turbo-q5_0.bin"
+        broken = models_dir / "ggml-small.bin"
+        active.write_bytes(b"m" * 1_000_001)
+        turbo.write_bytes(b"m" * 1_000_001)
+        broken.write_bytes(b"m" * 100)  # failed download: must be hidden
+        self.voice.stt_adapter = WhisperCliSpeechToTextAdapter(
+            "whisper-cli", active, "ffmpeg"
+        )
+
+        response = self.client.get("/api/v1/voice/models")
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["active"], "ggml-base.en.bin")
+        self.assertTrue(body["gpu_enabled"])
+        names = [model["name"] for model in body["models"]]
+        self.assertEqual(names, ["ggml-base.en.bin", "ggml-large-v3-turbo-q5_0.bin"])
+
+        response = self.client.post(
+            "/api/v1/voice/models/load",
+            json={"model_name": "ggml-large-v3-turbo-q5_0.bin"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["active"], "ggml-large-v3-turbo-q5_0.bin")
+        self.assertEqual(self.voice.stt_adapter.model_path, turbo)
+        self.assertEqual(
+            self.settings.read()["whisper_model"], "ggml-large-v3-turbo-q5_0.bin"
+        )
+
+    def test_voice_model_load_rejects_paths_and_missing_models(self) -> None:
+        models_dir = Path(self.tmp.name) / "models"
+        models_dir.mkdir()
+        active = models_dir / "ggml-base.en.bin"
+        active.write_bytes(b"m" * 1_000_001)
+        self.voice.stt_adapter = WhisperCliSpeechToTextAdapter(
+            "whisper-cli", active, "ffmpeg"
+        )
+
+        response = self.client.post(
+            "/api/v1/voice/models/load", json={"model_name": "../evil.bin"}
+        )
+        self.assertEqual(response.status_code, 400)
+
+        response = self.client.post(
+            "/api/v1/voice/models/load", json={"model_name": "ggml-missing.bin"}
+        )
+        self.assertEqual(response.status_code, 404)
+
+        # Unconfigured adapters have no model_path -> endpoint reports 503.
+        self.voice.stt_adapter = FakeSpeechToTextAdapter()
+        response = self.client.get("/api/v1/voice/models")
+        self.assertEqual(response.status_code, 503)
 
     def test_voice_state_update_emits_websocket_event(self) -> None:
         with self.client.websocket_connect("/api/v1/events") as websocket:

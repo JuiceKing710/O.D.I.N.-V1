@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { useOdinCamera } from "../hooks/useOdinCamera.js";
 import { useSpeechSynthesis } from "../hooks/useSpeechSynthesis.js";
 import {
+  analyzeScreen,
   createReflection,
   fetchConversationMessages,
   fetchConversations,
@@ -31,6 +32,7 @@ export function ChatView({ onOpenCoreFocus }) {
   const [speakingMessageId, setSpeakingMessageId] = useState("");
   const [showJumpLatest, setShowJumpLatest] = useState(false);
   const [voiceNotice, setVoiceNotice] = useState("");
+  const [screenAnalyzing, setScreenAnalyzing] = useState(false);
   const [providerStatus, setProviderStatus] = useState({
     error: "",
     loading: true,
@@ -515,6 +517,25 @@ export function ChatView({ onOpenCoreFocus }) {
     }
   }
 
+  async function lookAtScreen() {
+    setVoiceNotice("");
+    setScreenAnalyzing(true);
+    try {
+      const response = await analyzeScreen();
+      await sendMessage(
+        `(On the user's screen you can see: ${response.description}) Respond naturally to what you see.`,
+      );
+    } catch (err) {
+      setVoiceNotice(
+        err.detail?.permission_request
+          ? "Screen capture needs approval — check pending permissions in Settings."
+          : err.message,
+      );
+    } finally {
+      setScreenAnalyzing(false);
+    }
+  }
+
   function formatConversationTime(value) {
     return new Intl.DateTimeFormat(undefined, {
       dateStyle: "short",
@@ -686,6 +707,14 @@ export function ChatView({ onOpenCoreFocus }) {
             disabled={!camera.previewActive || camera.analyzing}
           >
             {camera.analyzing ? "Looking…" : "Look"}
+          </button>
+          <button
+            type="button"
+            onClick={lookAtScreen}
+            disabled={screenAnalyzing}
+            title="Capture the screen and let Odin describe it (asks permission first)"
+          >
+            {screenAnalyzing ? "Reading screen…" : "Screen"}
           </button>
           {camera.previewActive && camera.cameraDevices.length > 1 && (
             <select

@@ -214,6 +214,7 @@ class SettingsResponse(BaseModel):
     gemini_api_key_set: bool = False
     wake_word: bool = False
     truthfulness_check: bool = False
+    whisper_model: str = ""
 
 
 class SettingsUpdateRequest(BaseModel):
@@ -305,6 +306,18 @@ class VoiceSetupResponse(BaseModel):
     model_path: str
 
 
+class VoiceModelInfo(BaseModel):
+    name: str
+    size_bytes: int
+    active: bool
+
+
+class VoiceModelsResponse(BaseModel):
+    models: list[VoiceModelInfo]
+    active: str | None = None
+    gpu_enabled: bool | None = None
+
+
 class VoiceSynthesizeRequest(BaseModel):
     text: str = Field(min_length=1)
     voice_name: str | None = None
@@ -326,6 +339,10 @@ class VisionAnalyzeRequest(BaseModel):
     image_path: str | None = None
     image_base64: str | None = Field(default=None, max_length=30_000_000)
     image_suffix: str = ".jpg"
+    prompt: str | None = None
+
+
+class VisionScreenRequest(BaseModel):
     prompt: str | None = None
 
 

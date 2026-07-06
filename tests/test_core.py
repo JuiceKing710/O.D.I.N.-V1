@@ -882,6 +882,38 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(description, "Desc::a face")
         self.assertEqual(vision.state, VisionState.IDLE)
 
+    def test_ollama_vision_adapter_sends_keep_alive(self) -> None:
+        import json as json_module
+
+        from jarvis.backend.core.vision_manager import OllamaVisionAdapter
+
+        image = Path(self.tmp.name) / "frame.jpg"
+        image.write_bytes(b"jpegdata")
+        adapter = OllamaVisionAdapter(model="moondream", keep_alive="0")
+        captured = {}
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return None
+
+            def read(self):
+                return json_module.dumps({"message": {"content": "a desk"}}).encode()
+
+        def fake_urlopen(request, timeout=None):
+            captured["payload"] = json_module.loads(request.data.decode("utf-8"))
+            return FakeResponse()
+
+        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            description = adapter.analyze(image, "What is this?")
+
+        self.assertEqual(description, "a desk")
+        self.assertEqual(captured["payload"]["keep_alive"], "0")
+        self.assertEqual(captured["payload"]["model"], "moondream")
+        self.assertIs(captured["payload"]["think"], False)
+
     def test_vision_unconfigured_adapter_raises_and_resets_state(self) -> None:
         from jarvis.backend.core.vision_manager import VisionManager, VisionState
 
@@ -909,6 +941,19 @@ class CoreTests(unittest.TestCase):
             transcript = adapter.transcribe(audio)
 
         self.assertEqual(transcript, "hello from whisper")
+
+    def test_whisper_cli_gpu_flag_controls_ng_argument(self) -> None:
+        model = Path(self.tmp.name) / "model.bin"
+        model.write_bytes(b"model" + b"\0" * 1_000_000)
+        wav = Path(self.tmp.name) / "input.wav"
+
+        gpu_adapter = WhisperCliSpeechToTextAdapter("whisper-cli", model, "ffmpeg")
+        cpu_adapter = WhisperCliSpeechToTextAdapter(
+            "whisper-cli", model, "ffmpeg", use_gpu=False
+        )
+
+        self.assertNotIn("-ng", gpu_adapter.transcribe_command(wav))
+        self.assertIn("-ng", cpu_adapter.transcribe_command(wav))
 
     def test_wake_word_listener_publishes_through_bound_loop(self) -> None:
         from jarvis.backend.core.event_bus import EventBus
