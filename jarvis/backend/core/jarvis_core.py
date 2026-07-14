@@ -9,6 +9,7 @@ from jarvis.backend.core.bot_manager import BotManager, BotMessage
 from jarvis.backend.core.event_bus import EventBus
 from jarvis.backend.core.lm_provider import LMProviderInterface
 from jarvis.backend.core.memory_manager import MemoryManager
+from jarvis.backend.core.skill_manager import SkillManager
 from jarvis.backend.utils.audit_logging import AuditLogger
 
 
@@ -21,6 +22,7 @@ class JarvisCore:
         audit_logger: AuditLogger,
         event_bus: EventBus | None = None,
         read_settings: Callable[[], dict[str, Any]] | None = None,
+        skill_manager: SkillManager | None = None,
     ) -> None:
         self.memory = memory
         self.bot_manager = bot_manager
@@ -28,6 +30,7 @@ class JarvisCore:
         self.audit_logger = audit_logger
         self.event_bus = event_bus
         self.read_settings = read_settings
+        self.skill_manager = skill_manager
 
     async def handle_message(
         self,
@@ -51,8 +54,11 @@ class JarvisCore:
 
         image_url = None
         fact_reply = self._maybe_handle_fact(normalized, user.user_id)
+        skills_reply = self._maybe_handle_skills(normalized)
         if fact_reply is not None:
             bot_name, reply = "memory", fact_reply
+        elif skills_reply is not None:
+            bot_name, reply = "skills", skills_reply
         else:
             bot_name, bot_reply, bot_image_url = await self._maybe_dispatch_bot(normalized)
             if bot_reply is not None:
@@ -63,6 +69,7 @@ class JarvisCore:
                     self.memory.identity_context()
                     + self.memory.memory_block_context()
                     + self._active_model_context()
+                    + self._skill_context(normalized)
                     + self.memory.fact_context(user.user_id)
                     + self.memory.query_context(user.user_id, normalized, limit=5)
                 )
@@ -130,6 +137,36 @@ class JarvisCore:
             else:
                 note = "You are currently answering with your local on-device model (via Ollama)."
         return [f"[Current model] {note}"]
+
+    def _skills_enabled(self) -> bool:
+        if self.read_settings is None:
+            return True
+        try:
+            return self.read_settings().get("skills_enabled") is not False
+        except Exception:  # noqa: BLE001 - a settings read must never break chat
+            return True
+
+    def _skill_context(self, message: str) -> list[str]:
+        """Guidance from installed Agent Skills relevant to the current message."""
+        if self.skill_manager is None or not self._skills_enabled():
+            return []
+        return self.skill_manager.skill_context(message)
+
+    def _maybe_handle_skills(self, message: str) -> str | None:
+        """Handle the ``/skills`` command: list installed Agent Skills."""
+        if self.skill_manager is None or message.strip().lower() != "/skills":
+            return None
+        skills = self.skill_manager.list_skills()
+        if not skills:
+            return (
+                "No Agent Skills are installed. Drop skill folders under the skills/ "
+                "directory (e.g. `npx skills add nvidia/skills`), then say /skills again."
+            )
+        status = "on" if self._skills_enabled() else "off (enable in Settings)"
+        lines = "\n".join(
+            f"- {skill.name} — {skill.description or 'no description'}" for skill in skills
+        )
+        return f"Installed skills ({len(skills)}) · auto-match {status}:\n{lines}"
 
     HISTORY_TURN_LIMIT = 20
 

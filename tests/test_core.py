@@ -1537,6 +1537,82 @@ class CoreTests(unittest.TestCase):
         core = self._build_core(EchoLMProvider())  # read_settings is None
         self.assertEqual(core._active_model_context(), [])
 
+    def _make_skill(self, root: Path, name: str, description: str, body: str = "Steps.") -> None:
+        skill_dir = root / name
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text(
+            f"---\nname: {name}\ndescription: {description}\n---\n\n{body}",
+            encoding="utf-8",
+        )
+
+    def test_skill_manager_loads_matches_and_ignores_irrelevant(self) -> None:
+        import tempfile
+
+        from jarvis.backend.core.skill_manager import SkillManager
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._make_skill(root, "weather-report", "Generate a weather forecast for a city.")
+            manager = SkillManager(root)
+
+            self.assertIn("weather-report", [skill.name for skill in manager.list_skills()])
+            matched = manager.match("please give me a weather forecast for Boston")
+            self.assertTrue(any(skill.name == "weather-report" for skill in matched))
+            context = manager.skill_context("weather forecast please")
+            self.assertTrue(context)
+            self.assertIn("weather-report", context[0])
+            # An unrelated message should not pull the skill in.
+            self.assertEqual(manager.match("what time is it"), [])
+
+    def test_skill_manager_missing_directory_is_noop(self) -> None:
+        from jarvis.backend.core.skill_manager import SkillManager
+
+        manager = SkillManager(Path(self.tmp.name) / "does-not-exist")
+        self.assertEqual(manager.list_skills(), [])
+        self.assertEqual(manager.skill_context("anything at all"), [])
+
+    def test_skill_context_injected_and_gated_by_setting(self) -> None:
+        import tempfile
+
+        from jarvis.backend.core.skill_manager import SkillManager
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._make_skill(root, "math-helper", "Help with algebra and arithmetic math problems.")
+            core = JarvisCore(
+                memory=self.memory,
+                bot_manager=self.bot_manager,
+                lm_provider=EchoLMProvider(),
+                audit_logger=self.audit,
+                skill_manager=SkillManager(root),
+            )
+
+            context = core._skill_context("help me with an algebra math problem")
+            self.assertTrue(context)
+            self.assertIn("math-helper", context[0])
+
+            with patch.object(core, "read_settings", lambda: {"skills_enabled": False}):
+                self.assertEqual(core._skill_context("algebra math problem"), [])
+
+    def test_slash_skills_command_lists_installed(self) -> None:
+        import tempfile
+
+        from jarvis.backend.core.skill_manager import SkillManager
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._make_skill(root, "math-helper", "Help with algebra math problems.")
+            core = JarvisCore(
+                memory=self.memory,
+                bot_manager=self.bot_manager,
+                lm_provider=EchoLMProvider(),
+                audit_logger=self.audit,
+                skill_manager=SkillManager(root),
+            )
+            result = asyncio.run(core.handle_message("/skills", "tester"))
+            self.assertEqual(result["bot"], "skills")
+            self.assertIn("math-helper", result["reply"])
+
     def test_memory_consolidation_extracts_facts_and_updates_profile(self) -> None:
         from jarvis.backend.core.event_bus import EventBus
         from jarvis.backend.core.memory_consolidator import MemoryConsolidator

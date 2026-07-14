@@ -6,6 +6,8 @@ import {
   fetchImageStatus,
   fetchMemoryStatus,
   fetchModels,
+  fetchSkills,
+  reloadSkills,
   getAuthToken,
   fetchPermissionRequests,
   fetchRecoveryBackups,
@@ -65,6 +67,8 @@ export function SettingsPanel() {
   const [savingOpenRouter, setSavingOpenRouter] = useState(false);
   const [nvidiaKeyDraft, setNvidiaKeyDraft] = useState("");
   const [savingNvidia, setSavingNvidia] = useState(false);
+  const [skills, setSkills] = useState(null);
+  const [skillsReloading, setSkillsReloading] = useState(false);
   const [voiceStatus, setVoiceStatus] = useState(null);
   const [imageStatus, setImageStatus] = useState(null);
   const [voiceTesting, setVoiceTesting] = useState(false);
@@ -99,6 +103,15 @@ export function SettingsPanel() {
         if (!cancelled) {
           setError(err.message);
         }
+      });
+    fetchSkills()
+      .then((response) => {
+        if (!cancelled) {
+          setSkills(response);
+        }
+      })
+      .catch(() => {
+        // Skills are optional; leave null if unavailable.
       });
     fetchVoiceStatus()
       .then((status) => {
@@ -338,6 +351,20 @@ export function SettingsPanel() {
       setError(err.message);
     } finally {
       setSavingTurbo(false);
+    }
+  }
+
+  async function handleSkillsReload() {
+    setSkillsReloading(true);
+    setSaveNotice("");
+    setError("");
+    try {
+      setSkills(await reloadSkills());
+      setSaveNotice("Skills reloaded from disk.");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSkillsReloading(false);
     }
   }
 
@@ -757,6 +784,68 @@ ollama pull llama3.2`}</pre>
               />
               Verify each reply before sending
             </label>
+          </section>
+
+          <section className="settings-section" aria-label="Skills">
+            <div className="section-heading">
+              <h2>Skills</h2>
+              <span className={settings?.skills_enabled !== false ? "status-ok" : "status-muted"}>
+                {skills ? `${skills.skills.length} installed` : "…"}
+              </span>
+            </div>
+            <p className="section-hint">
+              Agent Skills are instruction sets Odin auto-matches to your request and follows
+              (e.g. NVIDIA's). Drop skill folders in the <code>skills/</code> directory or run{" "}
+              <code>npx skills add nvidia/skills</code>, then Reload. Most NVIDIA skills drive
+              GPU tooling that can't run on this Mac; the ones that use hosted APIs do. Skill
+              actions still go through Odin's permission prompts.
+            </p>
+            <label className="toggle-row">
+              <input
+                type="checkbox"
+                checked={settings?.skills_enabled !== false}
+                disabled={settingsLoading}
+                onChange={async (event) => {
+                  setError("");
+                  setSaveNotice("");
+                  try {
+                    await saveSettings({ skills_enabled: event.target.checked });
+                    setSaveNotice(
+                      event.target.checked
+                        ? "Skill auto-matching on."
+                        : "Skill auto-matching off.",
+                    );
+                  } catch (err) {
+                    setError(err.message);
+                  }
+                }}
+              />
+              Auto-match installed skills to requests
+            </label>
+            {skills?.skills?.length ? (
+              <ul className="permission-list">
+                {skills.skills.map((skill) => (
+                  <li key={skill.name}>
+                    <span>
+                      <strong>{skill.name}</strong>
+                      <small>{skill.description || "no description"}</small>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <div className="empty-state">
+                No skills installed. Add folders under skills/ and reload.
+              </div>
+            )}
+            <button
+              className="settings-action"
+              type="button"
+              disabled={skillsReloading}
+              onClick={handleSkillsReload}
+            >
+              {skillsReloading ? "Reloading" : "Reload skills"}
+            </button>
           </section>
 
           <section className="settings-section" aria-label="Image generation">

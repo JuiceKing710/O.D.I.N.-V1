@@ -217,6 +217,7 @@ class SettingsResponse(BaseModel):
     nvidia_api_key_set: bool = False
     wake_word: bool = False
     truthfulness_check: bool = False
+    skills_enabled: bool = True
     whisper_model: str = ""
 
 
@@ -232,6 +233,7 @@ class SettingsUpdateRequest(BaseModel):
     nvidia_api_key: str | None = None
     wake_word: bool | None = None
     truthfulness_check: bool | None = None
+    skills_enabled: bool | None = None
 
 
 class PermissionRequestResponse(BaseModel):
@@ -274,6 +276,17 @@ class ModelsResponse(BaseModel):
 
 class ModelLoadRequest(BaseModel):
     model_name: str = Field(min_length=1)
+
+
+class SkillInfoResponse(BaseModel):
+    name: str
+    description: str
+    path: str
+
+
+class SkillsResponse(BaseModel):
+    skills: list[SkillInfoResponse]
+    enabled: bool = True
 
 
 class EventResponse(BaseModel):

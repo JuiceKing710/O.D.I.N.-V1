@@ -29,6 +29,7 @@ from jarvis.backend.core.memory_manager import MemoryManager
 from jarvis.backend.core.recovery_manager import RecoveryManager
 from jarvis.backend.core.safety_switch import SafetySwitch
 from jarvis.backend.core.settings_store import SettingsStore
+from jarvis.backend.core.skill_manager import SkillManager
 from jarvis.backend.core.system_monitor import SystemMonitor
 from jarvis.backend.core.vector_store import (
     ChromaVectorStore,
@@ -467,6 +468,9 @@ def get_core() -> JarvisCore:
             "NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1"
         ),
     )
+    skill_manager = SkillManager(
+        Path(os.environ.get("JARVIS_SKILLS_DIR", "skills"))
+    )
     return JarvisCore(
         memory=memory,
         bot_manager=bot_manager,
@@ -474,4 +478,5 @@ def get_core() -> JarvisCore:
         audit_logger=audit_logger,
         event_bus=event_bus,
         read_settings=get_settings_store().read,
+        skill_manager=skill_manager,
     )

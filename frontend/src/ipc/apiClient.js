@@ -214,6 +214,14 @@ export function fetchModels() {
   return request("/api/v1/models");
 }
 
+export function fetchSkills() {
+  return request("/api/v1/skills");
+}
+
+export function reloadSkills() {
+  return request("/api/v1/skills/reload", { method: "POST" });
+}
+
 export function checkRecoveryIntegrity() {
   return request("/api/v1/recovery/integrity");
 }

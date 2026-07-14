@@ -26,6 +26,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # Emergency stop (master spec §Safety). When True, every high-impact bot
     # action is refused and the heartbeat loop pauses until explicitly resumed.
     "emergency_stop": False,
+    # When enabled, installed Agent Skills relevant to a message are auto-matched
+    # and their guidance is injected into context. Off disables skill matching.
+    "skills_enabled": True,
 }
 
 
