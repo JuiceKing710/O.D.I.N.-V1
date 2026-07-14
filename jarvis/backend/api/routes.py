@@ -55,6 +55,8 @@ from jarvis.backend.api.models import (
     SafetyStatusResponse,
     SettingsResponse,
     SettingsUpdateRequest,
+    SkillInfoResponse,
+    SkillsResponse,
     StartupHealthResponse,
     SystemOverviewResponse,
     ReflectionRequest,
@@ -854,6 +856,36 @@ async def load_model(
         models=[asdict(model) for model in models],
         provider=asdict(status),
     )
+
+
+def _skills_response(core: JarvisCore, settings: SettingsStore) -> SkillsResponse:
+    manager = core.skill_manager
+    skills = manager.list_skills() if manager is not None else []
+    return SkillsResponse(
+        skills=[
+            SkillInfoResponse(name=skill.name, description=skill.description, path=skill.path)
+            for skill in skills
+        ],
+        enabled=bool(settings.read().get("skills_enabled", True)),
+    )
+
+
+@router.get("/skills", response_model=SkillsResponse)
+def get_skills(
+    core: JarvisCore = Depends(get_core),
+    settings: SettingsStore = Depends(get_settings_store),
+) -> SkillsResponse:
+    return _skills_response(core, settings)
+
+
+@router.post("/skills/reload", response_model=SkillsResponse)
+def reload_skills(
+    core: JarvisCore = Depends(get_core),
+    settings: SettingsStore = Depends(get_settings_store),
+) -> SkillsResponse:
+    if core.skill_manager is not None:
+        core.skill_manager.reload()
+    return _skills_response(core, settings)
 
 
 @router.get("/events/history", response_model=list[EventResponse])

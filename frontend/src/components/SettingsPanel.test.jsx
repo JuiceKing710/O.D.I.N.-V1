@@ -12,6 +12,8 @@ vi.mock("../ipc/apiClient.js", () => ({
   fetchImageStatus: vi.fn(),
   fetchMemoryStatus: vi.fn(),
   fetchModels: vi.fn(),
+  fetchSkills: vi.fn(),
+  reloadSkills: vi.fn(),
   fetchPermissionRequests: vi.fn(),
   fetchRecoveryBackups: vi.fn(),
   fetchSettings: vi.fn(),
@@ -42,6 +44,7 @@ describe("SettingsPanel", () => {
       models: [{ id: "llama3.1:8b", loaded: true }],
       provider: { available: true, provider: "ollama", selected_model: "llama3.1:8b" },
     });
+    api.fetchSkills.mockResolvedValue({ skills: [], enabled: true });
     api.fetchVoiceStatus.mockResolvedValue({
       state: "idle",
       stt_adapter: "browser",

@@ -63,6 +63,11 @@ Key subsystems under `jarvis/backend/core/`:
   desktop, image), each gated by `utils/permissions.py` (`config/permissions.json` manifest;
   `allowed`/`prompt` permission states, one-time approvals, audit logged via
   `utils/audit_logging.py`).
+- **`skill_manager.py`** loads Agent-Skills-spec skills (`SKILL.md` folders) from `JARVIS_SKILLS_DIR`
+  (default `skills/`), lexically auto-matches them to each message, and injects the matched guidance
+  as `[Installed skill: …]` context (gated by the `skills_enabled` setting; `/skills` lists them).
+  Skills are reference/context only — any actions they describe still run through the permission-gated
+  bots.
 - **`lm_provider.py`** — Ollama-backed chat provider plus `EchoLMProvider` (tests), the
   OpenAI-compatible cloud providers `OpenRouterProvider`/`NvidiaProvider` (base
   `OpenAICompatibleProvider`), and `TurboSwitchProvider`, which routes each turn by the

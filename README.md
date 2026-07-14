@@ -76,6 +76,24 @@ working. An explicitly selected local model overrides Turbo. Override base URLs 
 API (only `*_api_key_set` booleans are exposed). Odin is told which model is currently answering, so
 you can ask it what it's running on.
 
+### Agent Skills
+
+Odin can use **Agent Skills** — portable `SKILL.md` instruction sets it auto-matches to a request
+and follows. Skills live in the `skills/` directory (override with `JARVIS_SKILLS_DIR`); each is a
+folder with a `SKILL.md` (YAML frontmatter `name`/`description` + markdown body). See
+[`skills/README.md`](skills/README.md). Toggle auto-matching under **Settings → Skills**
+(`skills_enabled`); `/skills` in chat lists installed skills. Install more from the Agent Skills
+registry, e.g. NVIDIA's verified skills:
+
+```bash
+npx skills add nvidia/skills
+```
+
+Note that most NVIDIA skills drive CUDA/Linux GPU tooling that can't run on Apple silicon — the ones
+that use NVIDIA's **hosted** APIs are the ones that work here. Skill text is user-installed reference
+material injected into context; any command/file/network action a skill describes still goes through
+Odin's permission-gated bots.
+
 Semantic long-term memory is on by default: every message and memory document is embedded
 through Ollama's `nomic-embed-text` model into `data/vectors.db` and recalled by meaning across
 conversations. Core memory blocks (Odin's persona and a profile of you) are always included in
