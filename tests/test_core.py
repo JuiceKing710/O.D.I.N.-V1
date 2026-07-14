@@ -29,7 +29,9 @@ from jarvis.backend.core.lm_provider import (
     EchoLMProvider,
     GeminiProvider,
     LMStudioProvider,
+    NvidiaProvider,
     OllamaProvider,
+    OpenRouterProvider,
     TurboSwitchProvider,
 )
 from jarvis.backend.core.memory_manager import MemoryManager
@@ -1326,6 +1328,214 @@ class CoreTests(unittest.TestCase):
         settings["turbo_mode"] = False
         local_status = asyncio.run(provider.status())
         self.assertEqual(local_status.provider, "builtin")
+
+    def test_openrouter_provider_sends_bearer_key_and_parses_reply(self) -> None:
+        provider = OpenRouterProvider(api_key="or-key", model="anthropic/claude-3.5-sonnet")
+        captured = {}
+
+        def fake_urlopen(request, timeout=None):
+            captured["url"] = request.full_url
+            captured["headers"] = dict(request.headers)
+            captured["payload"] = json.loads(request.data.decode("utf-8"))
+            return MockHttpResponse(
+                {"choices": [{"message": {"content": "Hello from OpenRouter."}}]}
+            )
+
+        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            reply = asyncio.run(provider.generate("hello", ["fact one"]))
+
+        self.assertEqual(reply, "Hello from OpenRouter.")
+        self.assertTrue(captured["url"].endswith("/chat/completions"))
+        self.assertEqual(captured["headers"].get("Authorization"), "Bearer or-key")
+        self.assertEqual(captured["payload"]["model"], "anthropic/claude-3.5-sonnet")
+        self.assertIn("Odin", captured["payload"]["messages"][0]["content"])
+        self.assertIn("fact one", captured["payload"]["messages"][1]["content"])
+
+    def test_openrouter_stream_yields_deltas(self) -> None:
+        provider = OpenRouterProvider(api_key="or-key", model="openai/gpt-4o")
+        lines = [
+            b'data: {"choices": [{"delta": {"content": "Hel"}}]}\n',
+            b'data: {"choices": [{"delta": {"content": "lo."}}]}\n',
+            b"data: [DONE]\n",
+        ]
+
+        async def collect():
+            chunks = []
+            async for delta in provider.generate_stream("hi", []):
+                chunks.append(delta)
+            return chunks
+
+        with patch("urllib.request.urlopen", return_value=FakeStreamResponse(lines)):
+            chunks = asyncio.run(collect())
+
+        self.assertEqual(chunks, ["Hel", "lo."])
+
+    def test_turbo_switch_routes_active_openrouter_model(self) -> None:
+        local = EchoLMProvider()
+        settings = {
+            "active_model": "openrouter:anthropic/claude-3.5-sonnet",
+            "openrouter_api_key": "or-key",
+        }
+        provider = TurboSwitchProvider(local, lambda: settings)
+
+        with patch(
+            "urllib.request.urlopen",
+            return_value=MockHttpResponse(
+                {"choices": [{"message": {"content": "router reply"}}]}
+            ),
+        ):
+            reply = asyncio.run(provider.generate("hello", []))
+            status = asyncio.run(provider.status())
+
+        self.assertEqual(reply, "router reply")
+        self.assertEqual(status.provider, "openrouter")
+        self.assertEqual(status.selected_model, "anthropic/claude-3.5-sonnet")
+
+    def test_turbo_switch_openrouter_falls_back_to_local_when_offline(self) -> None:
+        import urllib.error
+
+        local = EchoLMProvider()
+        settings = {
+            "active_model": "openrouter:openai/gpt-4o",
+            "openrouter_api_key": "or-key",
+        }
+        provider = TurboSwitchProvider(local, lambda: settings)
+
+        with patch(
+            "urllib.request.urlopen",
+            side_effect=urllib.error.URLError("no internet"),
+        ):
+            reply = asyncio.run(provider.generate("offline hello", []))
+
+        self.assertIn("offline hello", reply)
+        self.assertIn("no internet", provider.last_cloud_error["openrouter"])
+
+    def test_turbo_switch_explicit_local_model_beats_gemini_turbo(self) -> None:
+        # Selecting a local model in the dropdown must win over an enabled turbo.
+        local = EchoLMProvider()
+        settings = {
+            "active_model": "echo-local",
+            "turbo_mode": True,
+            "gemini_api_key": "test-key",
+        }
+        provider = TurboSwitchProvider(local, lambda: settings)
+
+        reply = asyncio.run(provider.generate("stay local", []))
+
+        self.assertIn("stay local", reply)
+
+    def test_turbo_switch_lists_local_and_openrouter_models(self) -> None:
+        local = OllamaProvider(model="llama3.2:3b")
+        settings = {"openrouter_api_key": "or-key"}
+        provider = TurboSwitchProvider(local, lambda: settings)
+
+        def fake_urlopen(request, timeout=None):
+            if request.full_url.endswith("/api/tags"):
+                return MockHttpResponse({"models": [{"name": "llama3.2:3b"}]})
+            return MockHttpResponse(
+                {"data": [{"id": "anthropic/claude-3.5-sonnet"}, {"id": "openai/gpt-4o"}]}
+            )
+
+        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            models = asyncio.run(provider.list_models())
+
+        ids = [model.id for model in models]
+        self.assertIn("llama3.2:3b", ids)
+        self.assertIn("openrouter:anthropic/claude-3.5-sonnet", ids)
+        self.assertIn("openrouter:openai/gpt-4o", ids)
+
+    def test_nvidia_provider_targets_integrate_api_with_bearer_key(self) -> None:
+        provider = NvidiaProvider(api_key="nvapi-key", model="nvidia/llama-3.1-nemotron-70b-instruct")
+        captured = {}
+
+        def fake_urlopen(request, timeout=None):
+            captured["url"] = request.full_url
+            captured["headers"] = dict(request.headers)
+            captured["payload"] = json.loads(request.data.decode("utf-8"))
+            return MockHttpResponse(
+                {"choices": [{"message": {"content": "Hello from NVIDIA."}}]}
+            )
+
+        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            reply = asyncio.run(provider.generate("hello", []))
+
+        self.assertEqual(reply, "Hello from NVIDIA.")
+        self.assertTrue(captured["url"].startswith("https://integrate.api.nvidia.com/v1"))
+        self.assertTrue(captured["url"].endswith("/chat/completions"))
+        self.assertEqual(captured["headers"].get("Authorization"), "Bearer nvapi-key")
+        self.assertEqual(captured["payload"]["model"], "nvidia/llama-3.1-nemotron-70b-instruct")
+
+    def test_turbo_switch_routes_active_nvidia_model(self) -> None:
+        local = EchoLMProvider()
+        # active_model carries the "nvidia:" scheme; the model id itself also starts
+        # with "nvidia/", so this guards against mishandling the doubled prefix.
+        settings = {
+            "active_model": "nvidia:nvidia/llama-3.1-nemotron-70b-instruct",
+            "nvidia_api_key": "nvapi-key",
+        }
+        provider = TurboSwitchProvider(local, lambda: settings)
+
+        with patch(
+            "urllib.request.urlopen",
+            return_value=MockHttpResponse(
+                {"choices": [{"message": {"content": "nemotron reply"}}]}
+            ),
+        ):
+            reply = asyncio.run(provider.generate("hello", []))
+            status = asyncio.run(provider.status())
+
+        self.assertEqual(reply, "nemotron reply")
+        self.assertEqual(status.provider, "nvidia")
+        self.assertEqual(status.selected_model, "nvidia/llama-3.1-nemotron-70b-instruct")
+
+    def test_turbo_switch_load_nvidia_model_requires_key(self) -> None:
+        local = EchoLMProvider()
+        settings: dict[str, Any] = {}
+        provider = TurboSwitchProvider(local, lambda: settings)
+
+        with self.assertRaises(RuntimeError):
+            asyncio.run(provider.load_model("nvidia:nvidia/llama-3.1-nemotron-70b-instruct"))
+
+    def test_nvidia_list_models_falls_back_when_catalog_unreachable(self) -> None:
+        import urllib.error
+
+        provider = NvidiaProvider(api_key="nvapi-key")
+        with patch("urllib.request.urlopen", side_effect=urllib.error.URLError("offline")):
+            models = asyncio.run(provider.list_models())
+
+        ids = [model.id for model in models]
+        self.assertIn("nvidia/llama-3.1-nemotron-70b-instruct", ids)
+        self.assertTrue(all(model.provider == "nvidia" for model in models))
+
+    def test_active_model_context_reflects_selected_provider(self) -> None:
+        core = self._build_core(EchoLMProvider())
+
+        with patch.object(
+            core,
+            "read_settings",
+            lambda: {"active_model": "nvidia:nvidia/llama-3.1-nemotron-70b-instruct"},
+        ):
+            note = core._active_model_context()
+        self.assertEqual(len(note), 1)
+        self.assertIn("NVIDIA", note[0])
+        self.assertIn("nemotron", note[0].lower())
+
+        with patch.object(
+            core, "read_settings", lambda: {"active_model": "openrouter:anthropic/claude-3.5-sonnet"}
+        ):
+            self.assertIn("OpenRouter", core._active_model_context()[0])
+
+        with patch.object(core, "read_settings", lambda: {"active_model": "llama3.2:3b"}):
+            self.assertIn("llama3.2:3b", core._active_model_context()[0])
+
+        with patch.object(
+            core, "read_settings", lambda: {"turbo_mode": True, "gemini_api_key": "k"}
+        ):
+            self.assertIn("Gemini", core._active_model_context()[0])
+
+    def test_active_model_context_empty_without_settings(self) -> None:
+        core = self._build_core(EchoLMProvider())  # read_settings is None
+        self.assertEqual(core._active_model_context(), [])
 
     def test_memory_consolidation_extracts_facts_and_updates_profile(self) -> None:
         from jarvis.backend.core.event_bus import EventBus

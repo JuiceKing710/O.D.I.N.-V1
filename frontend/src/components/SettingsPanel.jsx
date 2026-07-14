@@ -24,6 +24,22 @@ import { useAppState } from "../state/appContext.jsx";
 const PERMISSION_DECISIONS = ["prompt", "allowed", "denied"];
 const THEME_OPTIONS = ["system", "dark", "light"];
 const VOICE_MODE_OPTIONS = ["push_to_talk", "always_listening", "disabled"];
+// Cloud model ids arrive namespaced ("openrouter:anthropic/claude-3.5-sonnet",
+// "nvidia:nvidia/llama-3.1-nemotron-70b-instruct"); show the bare slug with a
+// provider tag so one dropdown reads cleanly for local and cloud alike.
+const CLOUD_SCHEME_LABELS = { openrouter: "OpenRouter", nvidia: "NVIDIA" };
+
+function modelLabel(id) {
+  if (typeof id === "string") {
+    for (const [scheme, label] of Object.entries(CLOUD_SCHEME_LABELS)) {
+      const prefix = `${scheme}:`;
+      if (id.startsWith(prefix)) {
+        return `${id.slice(prefix.length)} · ${label}`;
+      }
+    }
+  }
+  return id;
+}
 
 export function SettingsPanel() {
   const [models, setModels] = useState([]);
@@ -45,6 +61,10 @@ export function SettingsPanel() {
   const [turboDraft, setTurboDraft] = useState(false);
   const [geminiKeyDraft, setGeminiKeyDraft] = useState("");
   const [savingTurbo, setSavingTurbo] = useState(false);
+  const [openRouterKeyDraft, setOpenRouterKeyDraft] = useState("");
+  const [savingOpenRouter, setSavingOpenRouter] = useState(false);
+  const [nvidiaKeyDraft, setNvidiaKeyDraft] = useState("");
+  const [savingNvidia, setSavingNvidia] = useState(false);
   const [voiceStatus, setVoiceStatus] = useState(null);
   const [imageStatus, setImageStatus] = useState(null);
   const [voiceTesting, setVoiceTesting] = useState(false);
@@ -189,7 +209,9 @@ export function SettingsPanel() {
       const response = await loadModel(selectedModel);
       setModels(response.models);
       setProvider(response.provider);
+      await refreshSettings();
       setError("");
+      setSaveNotice(`Active model set to ${modelLabel(selectedModel)}.`);
     } catch (err) {
       setError(err.message);
     }
@@ -205,15 +227,100 @@ export function SettingsPanel() {
       if (geminiKeyDraft.trim()) {
         patch.gemini_api_key = geminiKeyDraft.trim();
       }
+      // Turbo drives Gemini; clear the explicit model selection so it takes over.
+      if (turboDraft) {
+        patch.active_model = "";
+      }
       await saveSettings(patch);
       setGeminiKeyDraft("");
       const response = await fetchModels();
       setProvider(response.provider);
+      setSelectedModel(response.provider?.selected_model || selectedModel);
       setSaveNotice(turboDraft ? "Turbo mode enabled." : "Turbo mode disabled — running local.");
     } catch (err) {
       setError(err.message);
     } finally {
       setSavingTurbo(false);
+    }
+  }
+
+  async function handleOpenRouterSave(event) {
+    event.preventDefault();
+    if (!openRouterKeyDraft.trim()) {
+      return;
+    }
+    setSavingOpenRouter(true);
+    setSaveNotice("");
+    setError("");
+    try {
+      await saveSettings({ openrouter_api_key: openRouterKeyDraft.trim() });
+      setOpenRouterKeyDraft("");
+      const response = await fetchModels();
+      setModels(response.models);
+      setProvider(response.provider);
+      setSaveNotice("OpenRouter key saved — its models are now in the model list.");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSavingOpenRouter(false);
+    }
+  }
+
+  async function handleClearOpenRouterKey() {
+    setSavingOpenRouter(true);
+    setSaveNotice("");
+    setError("");
+    try {
+      await saveSettings({ openrouter_api_key: "" });
+      setOpenRouterKeyDraft("");
+      const response = await fetchModels();
+      setModels(response.models);
+      setProvider(response.provider);
+      setSaveNotice("OpenRouter key removed.");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSavingOpenRouter(false);
+    }
+  }
+
+  async function handleNvidiaSave(event) {
+    event.preventDefault();
+    if (!nvidiaKeyDraft.trim()) {
+      return;
+    }
+    setSavingNvidia(true);
+    setSaveNotice("");
+    setError("");
+    try {
+      await saveSettings({ nvidia_api_key: nvidiaKeyDraft.trim() });
+      setNvidiaKeyDraft("");
+      const response = await fetchModels();
+      setModels(response.models);
+      setProvider(response.provider);
+      setSaveNotice("NVIDIA key saved — its models are now in the model list.");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSavingNvidia(false);
+    }
+  }
+
+  async function handleClearNvidiaKey() {
+    setSavingNvidia(true);
+    setSaveNotice("");
+    setError("");
+    try {
+      await saveSettings({ nvidia_api_key: "" });
+      setNvidiaKeyDraft("");
+      const response = await fetchModels();
+      setModels(response.models);
+      setProvider(response.provider);
+      setSaveNotice("NVIDIA key removed.");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSavingNvidia(false);
     }
   }
 
@@ -447,13 +554,13 @@ export function SettingsPanel() {
               >
                 {models.map((model) => (
                   <option key={model.id} value={model.id}>
-                    {model.id}
-                    {model.loaded ? " (loaded)" : ""}
+                    {modelLabel(model.id)}
+                    {model.loaded ? " (active)" : ""}
                   </option>
                 ))}
-                {!models.length && <option value="">No Ollama models found</option>}
+                {!models.length && <option value="">No models found</option>}
                 {!models.some((model) => model.id === selectedModel) && selectedModel && (
-                  <option value={selectedModel}>{selectedModel}</option>
+                  <option value={selectedModel}>{modelLabel(selectedModel)}</option>
                 )}
               </select>
               <button type="submit" disabled={!selectedModel.trim()}>
@@ -513,6 +620,100 @@ ollama pull llama3.2`}</pre>
                 </button>
                 {settings?.gemini_api_key_set && (
                   <button type="button" onClick={handleClearGeminiKey} disabled={savingTurbo}>
+                    Remove key
+                  </button>
+                )}
+              </div>
+            </form>
+          </section>
+
+          <section className="settings-section" aria-label="OpenRouter">
+            <div className="section-heading">
+              <h2>OpenRouter</h2>
+              <span className={settings?.openrouter_api_key_set ? "status-ok" : "status-muted"}>
+                {settings?.openrouter_api_key_set ? "Key set" : "Not set"}
+              </span>
+            </div>
+            <p className="section-hint">
+              Add one OpenRouter API key to unlock hundreds of cloud models (Claude, GPT,
+              Llama, DeepSeek and more). They appear in the Model dropdown above — pick one
+              to make it Odin's active brain. Messages leave this machine while an
+              OpenRouter model is active; switch back to a local model any time. Get a key
+              at <code>openrouter.ai/keys</code>.
+            </p>
+            <form className="settings-form" onSubmit={handleOpenRouterSave}>
+              <label>
+                OpenRouter API key
+                <input
+                  type="password"
+                  autoComplete="off"
+                  placeholder={
+                    settings?.openrouter_api_key_set
+                      ? "Key saved — enter to replace"
+                      : "Paste API key (sk-or-…)"
+                  }
+                  value={openRouterKeyDraft}
+                  onChange={(event) => setOpenRouterKeyDraft(event.target.value)}
+                />
+              </label>
+              <div className="inline-form">
+                <button
+                  type="submit"
+                  disabled={savingOpenRouter || settingsLoading || !openRouterKeyDraft.trim()}
+                >
+                  {savingOpenRouter ? "Saving" : "Save key"}
+                </button>
+                {settings?.openrouter_api_key_set && (
+                  <button
+                    type="button"
+                    onClick={handleClearOpenRouterKey}
+                    disabled={savingOpenRouter}
+                  >
+                    Remove key
+                  </button>
+                )}
+              </div>
+            </form>
+          </section>
+
+          <section className="settings-section" aria-label="NVIDIA">
+            <div className="section-heading">
+              <h2>NVIDIA</h2>
+              <span className={settings?.nvidia_api_key_set ? "status-ok" : "status-muted"}>
+                {settings?.nvidia_api_key_set ? "Key set" : "Not set"}
+              </span>
+            </div>
+            <p className="section-hint">
+              Add an NVIDIA API key to run their hosted models (Nemotron, Llama-Nemotron
+              and more) for more advanced reasoning. They appear in the Model dropdown
+              above — pick one to make it Odin's active brain. Runs on NVIDIA's cloud, so
+              messages leave this machine while an NVIDIA model is active. Get a key at{" "}
+              <code>build.nvidia.com</code> (starts with <code>nvapi-</code>).
+            </p>
+            <form className="settings-form" onSubmit={handleNvidiaSave}>
+              <label>
+                NVIDIA API key
+                <input
+                  type="password"
+                  autoComplete="off"
+                  placeholder={
+                    settings?.nvidia_api_key_set
+                      ? "Key saved — enter to replace"
+                      : "Paste API key (nvapi-…)"
+                  }
+                  value={nvidiaKeyDraft}
+                  onChange={(event) => setNvidiaKeyDraft(event.target.value)}
+                />
+              </label>
+              <div className="inline-form">
+                <button
+                  type="submit"
+                  disabled={savingNvidia || settingsLoading || !nvidiaKeyDraft.trim()}
+                >
+                  {savingNvidia ? "Saving" : "Save key"}
+                </button>
+                {settings?.nvidia_api_key_set && (
+                  <button type="button" onClick={handleClearNvidiaKey} disabled={savingNvidia}>
                     Remove key
                   </button>
                 )}

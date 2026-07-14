@@ -106,6 +106,7 @@ from jarvis.backend.core.bot_manager import BotMessage
 from jarvis.backend.core.event_bus import EventBus
 from jarvis.backend.core.image_manager import ImageManager
 from jarvis.backend.core.jarvis_core import JarvisCore
+from jarvis.backend.core.lm_provider import CLOUD_PROVIDER_SCHEMES
 from jarvis.backend.core.heartbeat import HeartbeatEngine
 from jarvis.backend.core.identity_manager import IdentityManager
 from jarvis.backend.core.improvement_manager import ImprovementManager
@@ -142,6 +143,10 @@ def _settings_response(
     data["permissions"] = permission_manager.as_settings()
     data["gemini_api_key_set"] = bool(str(data.get("gemini_api_key") or "").strip())
     data.pop("gemini_api_key", None)
+    data["openrouter_api_key_set"] = bool(str(data.get("openrouter_api_key") or "").strip())
+    data.pop("openrouter_api_key", None)
+    data["nvidia_api_key_set"] = bool(str(data.get("nvidia_api_key") or "").strip())
+    data.pop("nvidia_api_key", None)
     return SettingsResponse(**data)
 
 
@@ -837,7 +842,12 @@ async def load_model(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    settings.update({"model_name": loaded.id})
+    # active_model is the single brain selector; model_name additionally tracks
+    # the chosen local model so it survives switching to a cloud model and back.
+    patch: dict[str, str] = {"active_model": request.model_name.strip()}
+    if loaded.provider not in CLOUD_PROVIDER_SCHEMES:
+        patch["model_name"] = loaded.id
+    settings.update(patch)
     models = await core.lm_provider.list_models()
     status = await core.lm_provider.status()
     return ModelsResponse(

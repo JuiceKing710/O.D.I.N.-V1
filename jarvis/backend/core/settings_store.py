@@ -10,6 +10,10 @@ from jarvis.backend.utils.atomic_write import atomic_write_text
 DEFAULT_SETTINGS: dict[str, Any] = {
     "voice_mode": "push_to_talk",
     "model_name": "local-default",
+    # The single active-brain selector. Empty = legacy behaviour (turbo/Gemini
+    # when enabled, else local Ollama). A bare model id forces that local model;
+    # an "openrouter:<model-id>" value routes chat through OpenRouter.
+    "active_model": "",
     # Whisper speech model filename inside the models dir ("" = default base.en).
     "whisper_model": "",
     "theme": "system",

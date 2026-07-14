@@ -56,6 +56,26 @@ When `OLLAMA_MODEL` is not set, Jarvis uses the model last loaded from Settings 
 (persisted in `data/settings.json`), and otherwise auto-selects the first installed chat
 model, skipping embedding-only models such as `nomic-embed-text`.
 
+### Model providers (local + cloud)
+
+Odin runs on interchangeable model backends, all selectable from **Settings → Model** with a
+single active-model dropdown (persisted as `active_model` in `data/settings.json`):
+
+- **Local (Ollama)** — the default, fully on-device. A bare model id (e.g. `llama3.2:3b`) is local.
+- **Google Gemini (turbo mode)** — enable Turbo Mode and add a Gemini API key. Used when no other
+  model is explicitly selected.
+- **OpenRouter** — add one key (Settings → OpenRouter) to unlock hundreds of cloud models (Claude,
+  GPT, Llama, DeepSeek…). Selected models are stored as `openrouter:<model-id>`.
+- **NVIDIA** — add a key from [build.nvidia.com](https://build.nvidia.com) (Settings → NVIDIA) to
+  run NVIDIA's hosted models (Nemotron and more). Stored as `nvidia:<model-id>`. When the live model
+  catalog is unreachable, a small set of flagship NVIDIA models is offered as a fallback.
+
+Cloud providers automatically fall back to the local model if unreachable, so offline use keeps
+working. An explicitly selected local model overrides Turbo. Override base URLs with
+`OPENROUTER_BASE_URL` and `NVIDIA_BASE_URL`. API keys are stored locally and never returned by the
+API (only `*_api_key_set` booleans are exposed). Odin is told which model is currently answering, so
+you can ask it what it's running on.
+
 Semantic long-term memory is on by default: every message and memory document is embedded
 through Ollama's `nomic-embed-text` model into `data/vectors.db` and recalled by meaning across
 conversations. Core memory blocks (Odin's persona and a profile of you) are always included in

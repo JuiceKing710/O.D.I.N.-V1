@@ -62,6 +62,7 @@ class JarvisCore:
                 context = (
                     self.memory.identity_context()
                     + self.memory.memory_block_context()
+                    + self._active_model_context()
                     + self.memory.fact_context(user.user_id)
                     + self.memory.query_context(user.user_id, normalized, limit=5)
                 )
@@ -90,6 +91,45 @@ class JarvisCore:
             "created_at": datetime.now(timezone.utc),
             "image_url": image_url,
         }
+
+    def _active_model_context(self) -> list[str]:
+        """A grounded note telling Odin which model/provider is answering right now.
+
+        Derived cheaply from settings (no network) so Odin can answer "what model
+        are you?" truthfully as the user switches backends. Mirrors the routing in
+        TurboSwitchProvider. Returns [] when settings are unavailable.
+        """
+        if self.read_settings is None:
+            return []
+        try:
+            settings = self.read_settings()
+        except Exception:  # noqa: BLE001 - a settings read must never break chat
+            return []
+        active = str(settings.get("active_model") or "").strip()
+        if active.startswith("openrouter:"):
+            note = (
+                "You are currently answering through OpenRouter, using the model "
+                f"'{active[len('openrouter:') :]}'."
+            )
+        elif active.startswith("nvidia:"):
+            note = (
+                "You are currently answering through NVIDIA's hosted API, using the "
+                f"model '{active[len('nvidia:') :]}'."
+            )
+        elif active:
+            note = f"You are currently answering with the local on-device model '{active}' (via Ollama)."
+        elif settings.get("turbo_mode") and str(settings.get("gemini_api_key") or "").strip():
+            note = "You are currently answering through Google Gemini (turbo mode is on)."
+        else:
+            model_name = str(settings.get("model_name") or "").strip()
+            if model_name and model_name != "local-default":
+                note = (
+                    f"You are currently answering with the local on-device model "
+                    f"'{model_name}' (via Ollama)."
+                )
+            else:
+                note = "You are currently answering with your local on-device model (via Ollama)."
+        return [f"[Current model] {note}"]
 
     HISTORY_TURN_LIMIT = 20
 

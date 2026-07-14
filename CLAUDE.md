@@ -63,8 +63,13 @@ Key subsystems under `jarvis/backend/core/`:
   desktop, image), each gated by `utils/permissions.py` (`config/permissions.json` manifest;
   `allowed`/`prompt` permission states, one-time approvals, audit logged via
   `utils/audit_logging.py`).
-- **`lm_provider.py`** — Ollama-backed chat provider plus `EchoLMProvider` (tests) and
-  `TurboSwitchProvider` (live model switching).
+- **`lm_provider.py`** — Ollama-backed chat provider plus `EchoLMProvider` (tests), the
+  OpenAI-compatible cloud providers `OpenRouterProvider`/`NvidiaProvider` (base
+  `OpenAICompatibleProvider`), and `TurboSwitchProvider`, which routes each turn by the
+  `active_model` setting: `openrouter:`/`nvidia:` scheme → that cloud provider (with local
+  fallback), a bare id → that local Ollama model (overrides Gemini turbo), empty → legacy
+  Gemini-turbo-or-local. New cloud providers are added via its `_CLOUD_PROVIDERS` registry.
+  `jarvis_core` injects a `[Current model]` context note so Odin knows which backend is answering.
 - **`memory_manager.py`** / **`vector_store.py`** — SQLite conversation/message store, core memory
   blocks (persona + user profile), long-term fact storage, and semantic recall via Ollama
   embeddings (SQLite-backed by default, Chroma optional).

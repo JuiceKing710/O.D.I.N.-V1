@@ -460,6 +460,12 @@ def get_core() -> JarvisCore:
         local_provider,
         get_settings_store().read,
         gemini_model=os.environ.get("GEMINI_MODEL", "gemini-2.5-flash"),
+        openrouter_base_url=os.environ.get(
+            "OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"
+        ),
+        nvidia_base_url=os.environ.get(
+            "NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1"
+        ),
     )
     return JarvisCore(
         memory=memory,
