@@ -208,10 +208,13 @@ class TaskResponse(BaseModel):
 class SettingsResponse(BaseModel):
     voice_mode: str = "push_to_talk"
     model_name: str = "local-default"
+    active_model: str = ""
     theme: str = "system"
     permissions: dict[str, str] = Field(default_factory=dict)
     turbo_mode: bool = False
     gemini_api_key_set: bool = False
+    openrouter_api_key_set: bool = False
+    nvidia_api_key_set: bool = False
     wake_word: bool = False
     truthfulness_check: bool = False
     whisper_model: str = ""
@@ -220,10 +223,13 @@ class SettingsResponse(BaseModel):
 class SettingsUpdateRequest(BaseModel):
     voice_mode: Literal["push_to_talk", "always_listening", "disabled"] | None = None
     model_name: str | None = None
+    active_model: str | None = None
     theme: Literal["system", "dark", "light"] | None = None
     permissions: dict[str, Literal["allowed", "denied", "prompt"]] | None = None
     turbo_mode: bool | None = None
     gemini_api_key: str | None = None
+    openrouter_api_key: str | None = None
+    nvidia_api_key: str | None = None
     wake_word: bool | None = None
     truthfulness_check: bool | None = None
 
