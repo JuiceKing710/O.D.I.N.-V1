@@ -349,6 +349,7 @@ export function ChatView({ onOpenCoreFocus }) {
           role: message.role,
           content: message.content,
           conversationId: message.convo_id,
+          imageUrl: message.image_url || null,
         })),
       );
       setInput("");

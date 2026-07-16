@@ -155,6 +155,42 @@ describe("ChatView generated images", () => {
 
     expect(screen.queryByRole("img")).not.toBeInTheDocument();
   });
+
+  it("maps a persisted image_url when a stored conversation is reopened", async () => {
+    const { fetchConversations, fetchConversationMessages, fetchReflections } = await import(
+      "../ipc/apiClient.js"
+    );
+    fetchConversations.mockResolvedValueOnce([
+      {
+        convo_id: 5,
+        title: "Fox chat",
+        message_count: 2,
+        last_activity_at: new Date().toISOString(),
+      },
+    ]);
+    fetchReflections.mockResolvedValueOnce([]);
+    fetchConversationMessages.mockResolvedValueOnce([
+      {
+        msg_id: 9,
+        convo_id: 5,
+        role: "assistant",
+        content: "Here's an AI-generated image of: a fox",
+        image_url: "/api/v1/image/file/fox.png",
+      },
+    ]);
+
+    render(<ChatView onOpenCoreFocus={vi.fn()} />);
+
+    fireEvent.click(await screen.findByText("Fox chat"));
+
+    await waitFor(() =>
+      expect(chatState.setMessages).toHaveBeenCalledWith(
+        expect.arrayContaining([
+          expect.objectContaining({ imageUrl: "/api/v1/image/file/fox.png" }),
+        ]),
+      ),
+    );
+  });
 });
 
 describe("ChatView camera", () => {

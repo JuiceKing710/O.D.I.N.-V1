@@ -70,6 +70,7 @@ export const useChatStore = create((set) => ({
           role: event.payload.role,
           content: event.payload.content,
           conversationId: event.payload.conversation_id,
+          imageUrl: event.payload.image_url || null,
         };
         const streaming = message.role === "assistant" ? null : state.streaming;
         if (

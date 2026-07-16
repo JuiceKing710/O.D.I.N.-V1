@@ -176,6 +176,14 @@ new file content
 The research bot performs a bounded DuckDuckGo HTML lookup, the code bot analyzes real local files,
 and the system bot executes a parsed command without shell expansion.
 
+Odin can generate images on request — natural-language phrasings such as `draw a picture of a fox
+in the snow` (or `/image generate a fox in the snow`) dispatch the image bot behind the
+`generate_images` permission (plus `access_network` when a cloud generator is configured). The
+generated image is displayed inline in the chat, right below Odin's reply, with a **Save image**
+button to keep a copy. The image reference is stored on the assistant message, so it renders again
+whenever the conversation is reopened rather than disappearing after the first response. Generated
+files are held in a rolling on-disk cache and served from `/api/v1/image/file/<name>`.
+
 The backend defaults to a SQLite database at `data/jarvis.db`. Override it with:
 
 ```bash

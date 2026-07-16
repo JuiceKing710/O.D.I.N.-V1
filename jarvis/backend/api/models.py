@@ -167,6 +167,7 @@ class ConversationMessageResponse(BaseModel):
     role: str
     content: str
     created_at: datetime
+    image_url: str | None = None
 
 
 class BotExecRequest(BaseModel):

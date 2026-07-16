@@ -73,6 +73,7 @@ class MessageRecord:
     content: str
     embedding_id: str | None
     created_at: datetime
+    image_url: str | None = None
 
     def to_api(self) -> dict[str, Any]:
         return {
@@ -81,6 +82,7 @@ class MessageRecord:
             "role": self.role,
             "content": self.content,
             "created_at": self.created_at,
+            "image_url": self.image_url,
         }
 
 
@@ -349,20 +351,21 @@ class MemoryManager:
         role: Literal["user", "assistant", "bot"],
         content: str,
         embedding_id: str | None = None,
+        image_url: str | None = None,
     ) -> MessageRecord:
         if not content.strip():
             raise ValueError("content is required")
         with self._connect() as conn:
             cursor = conn.execute(
                 """
-                INSERT INTO messages(convo_id, role, content, embedding_id)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO messages(convo_id, role, content, embedding_id, image_url)
+                VALUES (?, ?, ?, ?, ?)
                 """,
-                (convo_id, role, content, None),
+                (convo_id, role, content, None, image_url),
             )
             row = conn.execute(
                 """
-                SELECT msg_id, convo_id, role, content, embedding_id, created_at
+                SELECT msg_id, convo_id, role, content, embedding_id, created_at, image_url
                 FROM messages
                 WHERE msg_id = ?
                 """,
@@ -789,7 +792,7 @@ class MemoryManager:
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT msg_id, convo_id, role, content, embedding_id, created_at
+                SELECT msg_id, convo_id, role, content, embedding_id, created_at, image_url
                 FROM messages
                 WHERE convo_id = ?
                 ORDER BY created_at ASC, msg_id ASC
@@ -1233,6 +1236,9 @@ class MemoryManager:
 
     @classmethod
     def _message_from_row(cls, row: sqlite3.Row) -> MessageRecord:
+        # image_url only exists on rows from SELECTs that request it (the chat
+        # display paths); recall/query SELECTs omit it, so read defensively.
+        keys = row.keys()
         return MessageRecord(
             msg_id=row["msg_id"],
             convo_id=row["convo_id"],
@@ -1240,6 +1246,7 @@ class MemoryManager:
             content=row["content"],
             embedding_id=row["embedding_id"],
             created_at=cls._parse_datetime(row["created_at"]),
+            image_url=row["image_url"] if "image_url" in keys else None,
         )
 
     @classmethod

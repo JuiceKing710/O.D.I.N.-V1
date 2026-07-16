@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Callable
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 
 def _migration_1(connection: sqlite3.Connection) -> None:
@@ -170,6 +170,18 @@ def _migration_6(connection: sqlite3.Connection) -> None:
     )
 
 
+def _migration_7(connection: sqlite3.Connection) -> None:
+    # Direct image display: persist the generated-image reference alongside the
+    # assistant message that produced it, so a rendered image survives a
+    # conversation reload instead of only appearing in the immediate chat
+    # response. NULL for every message that has no image.
+    connection.executescript(
+        """
+        ALTER TABLE messages ADD COLUMN image_url TEXT;
+        """
+    )
+
+
 MIGRATIONS: tuple[tuple[int, Callable[[sqlite3.Connection], None]], ...] = (
     (1, _migration_1),
     (2, _migration_2),
@@ -177,6 +189,7 @@ MIGRATIONS: tuple[tuple[int, Callable[[sqlite3.Connection], None]], ...] = (
     (4, _migration_4),
     (5, _migration_5),
     (6, _migration_6),
+    (7, _migration_7),
 )
 
 

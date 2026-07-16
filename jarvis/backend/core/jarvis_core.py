@@ -83,8 +83,12 @@ class JarvisCore:
                         normalized, context, history, convo.convo_id, metadata or {}
                     )
 
-        assistant_message = self.memory.add_message(convo.convo_id, "assistant", reply)
-        self._publish_chat_message(assistant_message.role, assistant_message.content, convo.convo_id)
+        assistant_message = self.memory.add_message(
+            convo.convo_id, "assistant", reply, image_url=image_url
+        )
+        self._publish_chat_message(
+            assistant_message.role, assistant_message.content, convo.convo_id, image_url=image_url
+        )
         self.audit_logger.log(
             actor=username,
             action="chat",
@@ -285,7 +289,9 @@ class JarvisCore:
                 transient=True,
             )
 
-    def _publish_chat_message(self, role: str, content: str, conversation_id: int) -> None:
+    def _publish_chat_message(
+        self, role: str, content: str, conversation_id: int, image_url: str | None = None
+    ) -> None:
         if self.event_bus is None:
             return
         self.event_bus.publish(
@@ -294,6 +300,7 @@ class JarvisCore:
                 "conversation_id": conversation_id,
                 "role": role,
                 "content": content,
+                "image_url": image_url,
             },
         )
 

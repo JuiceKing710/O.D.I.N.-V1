@@ -1866,6 +1866,28 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(result["bot"], "image")
         self.assertTrue(result["image_url"].startswith("/api/v1/image/file/"))
 
+    def test_generated_image_persists_on_the_assistant_message(self) -> None:
+        # Direct image display: the rendered image must survive a conversation
+        # reload, not only appear in the immediate chat response.
+        from jarvis.backend.bots.image_bot import ImageBot
+        from jarvis.backend.core.image_manager import ImageManager, StubImageAdapter
+
+        self.permissions.update_decisions({"generate_images": "allowed"})
+        manager = ImageManager(
+            adapter=StubImageAdapter(), output_dir=Path(self.tmp.name) / "images"
+        )
+        self.bot_manager.register(ImageBot(self.permissions, self.audit, manager))
+
+        result = asyncio.run(self.core.handle_message("draw a picture of a fox", "zeb"))
+
+        messages = self.memory.list_conversation_messages(result["conversation_id"])
+        assistant = next(message for message in messages if message.role == "assistant")
+        self.assertEqual(assistant.image_url, result["image_url"])
+        self.assertIsNone(
+            next(message for message in messages if message.role == "user").image_url
+        )
+        self.assertEqual(assistant.to_api()["image_url"], result["image_url"])
+
     def test_verification_pass_corrects_flagged_reply(self) -> None:
         # Provider whose first answer fabricates, whose fact-check flags it, and
         # whose correction is grounded. Proves the generate->verify->correct loop.
