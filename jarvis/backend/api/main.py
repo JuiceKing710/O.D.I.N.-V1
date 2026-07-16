@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from jarvis.backend.api.routes import router
+from jarvis.backend.api.feature_routes import router as feature_router
 import asyncio
 
 from jarvis.backend.core.app_factory import (
@@ -16,6 +17,7 @@ from jarvis.backend.core.app_factory import (
     get_core,
     get_heartbeat_engine,
     get_memory_consolidator,
+    get_security_monitor,
     get_settings_store,
     get_system_monitor,
     get_wake_word_listener,
@@ -65,6 +67,8 @@ def create_app() -> FastAPI:
         consolidator.start()
         heartbeat = get_heartbeat_engine()
         heartbeat.start()
+        security = get_security_monitor()
+        security.start()  # no-op unless JARVIS_SECURITY_MONITOR is enabled
         wake_listener = get_wake_word_listener()
         wake_listener.bind_loop(asyncio.get_running_loop())
         if get_settings_store().read().get("wake_word"):
@@ -73,6 +77,7 @@ def create_app() -> FastAPI:
             yield
         finally:
             wake_listener.stop()
+            await security.stop()
             await heartbeat.stop()
             await consolidator.stop()
             await monitor.stop()
@@ -101,6 +106,7 @@ def create_app() -> FastAPI:
         allow_headers=["Content-Type", "Authorization", "X-Odin-Token"],
     )
     app.include_router(router)
+    app.include_router(feature_router)
     static_dir = _static_dir()
     if static_dir is not None:
         # Mounted last so the explicit /api routes always win; this catches the

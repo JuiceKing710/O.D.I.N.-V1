@@ -28,6 +28,7 @@ from jarvis.backend.core.memory_consolidator import MemoryConsolidator
 from jarvis.backend.core.memory_manager import MemoryManager
 from jarvis.backend.core.recovery_manager import RecoveryManager
 from jarvis.backend.core.safety_switch import SafetySwitch
+from jarvis.backend.core.security_monitor import SecurityMonitor
 from jarvis.backend.core.settings_store import SettingsStore
 from jarvis.backend.core.skill_manager import SkillManager
 from jarvis.backend.core.system_monitor import SystemMonitor
@@ -64,6 +65,14 @@ from jarvis.backend.core.voice_manager import (
 )
 from jarvis.backend.utils.audit_logging import AuditLogger
 from jarvis.backend.utils.permissions import PermissionManager
+from jarvis.backend.core.json_output import ConstrainedGenerator
+from jarvis.backend.core.tool_provider import ToolRegistry, ToolInvocationHandler
+from jarvis.backend.core.inference_optimizer import (
+    InferenceConfig,
+    PerformanceMonitor,
+    auto_detect_threads,
+)
+from jarvis.backend.core.rag_engine import RAGEngine, RAGConfig
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[2]
@@ -98,6 +107,13 @@ def _venv_binary(name: str) -> str | None:
 def _env_int(name: str, default: int) -> int:
     try:
         return int(os.environ.get(name, str(default)))
+    except ValueError:
+        return default
+
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.environ.get(name, str(default)))
     except ValueError:
         return default
 
@@ -418,6 +434,73 @@ def get_agent_manager() -> DeepResearchAgent:
 
 
 @lru_cache(maxsize=1)
+def get_security_monitor() -> SecurityMonitor:
+    # Off unless explicitly enabled; when on it reads the camera list written by
+    # scripts/setup_cameras.py and runs the motion-gated monitor. Reuses the
+    # shared VisionManager so camera frames go through the same (local-first)
+    # vision adapter, and persists alerts to memory so Odin can recall them.
+    core = get_core()
+    enabled = os.environ.get("JARVIS_SECURITY_MONITOR", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+        "enabled",
+    }
+    return SecurityMonitor(
+        get_vision_manager(),
+        event_bus=get_event_bus(),
+        memory=core.memory,
+        cameras_path=os.environ.get("JARVIS_CAMERAS_CONFIG", "data/cameras.json"),
+        interval_seconds=_env_float("JARVIS_SECURITY_INTERVAL_SECONDS", 15.0),
+        motion_threshold=_env_float("JARVIS_SECURITY_MOTION_THRESHOLD", 8.0),
+        cooldown_seconds=_env_float("JARVIS_SECURITY_COOLDOWN_SECONDS", 60.0),
+        enabled=enabled,
+        ffmpeg=os.environ.get("JARVIS_FFMPEG", "ffmpeg"),
+    )
+
+
+@lru_cache(maxsize=1)
+def get_tool_registry() -> ToolRegistry:
+    return ToolRegistry()
+
+
+@lru_cache(maxsize=1)
+def get_tool_invocation_handler() -> ToolInvocationHandler:
+    return ToolInvocationHandler(get_tool_registry())
+
+
+@lru_cache(maxsize=1)
+def get_constrained_generator() -> ConstrainedGenerator:
+    return ConstrainedGenerator(max_retries=3)
+
+
+@lru_cache(maxsize=1)
+def get_inference_config() -> InferenceConfig:
+    return InferenceConfig(
+        num_threads=auto_detect_threads(),
+        use_gpu=os.environ.get("JARVIS_INFERENCE_GPU", "enabled").lower()
+        not in {"0", "false", "disabled"},
+        quantization_preset=os.environ.get("JARVIS_QUANT_PRESET", "q4"),
+    )
+
+
+@lru_cache(maxsize=1)
+def get_performance_monitor() -> PerformanceMonitor:
+    return PerformanceMonitor()
+
+
+@lru_cache(maxsize=1)
+def get_rag_engine() -> RAGEngine:
+    config = RAGConfig(
+        chunk_size=_env_int("JARVIS_RAG_CHUNK_SIZE", 512),
+        chunk_overlap=_env_int("JARVIS_RAG_CHUNK_OVERLAP", 100),
+        top_k=_env_int("JARVIS_RAG_TOP_K", 5),
+    )
+    return RAGEngine(get_vector_store(), config=config)
+
+
+@lru_cache(maxsize=1)
 def get_core() -> JarvisCore:
     permission_manager = get_permission_manager()
     audit_logger = get_audit_logger()
@@ -479,4 +562,7 @@ def get_core() -> JarvisCore:
         event_bus=event_bus,
         read_settings=get_settings_store().read,
         skill_manager=skill_manager,
+        tool_invocation_handler=get_tool_invocation_handler(),
+        performance_monitor=get_performance_monitor(),
+        rag_engine=get_rag_engine(),
     )

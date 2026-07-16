@@ -10,6 +10,9 @@ from jarvis.backend.core.event_bus import EventBus
 from jarvis.backend.core.lm_provider import LMProviderInterface
 from jarvis.backend.core.memory_manager import MemoryManager
 from jarvis.backend.core.skill_manager import SkillManager
+from jarvis.backend.core.tool_provider import ToolInvocationHandler, ToolCallExtractor
+from jarvis.backend.core.inference_optimizer import KVCacheOptimizer, PerformanceMonitor
+from jarvis.backend.core.rag_engine import RAGEngine
 from jarvis.backend.utils.audit_logging import AuditLogger
 
 
@@ -23,6 +26,9 @@ class JarvisCore:
         event_bus: EventBus | None = None,
         read_settings: Callable[[], dict[str, Any]] | None = None,
         skill_manager: SkillManager | None = None,
+        tool_invocation_handler: ToolInvocationHandler | None = None,
+        performance_monitor: PerformanceMonitor | None = None,
+        rag_engine: RAGEngine | None = None,
     ) -> None:
         self.memory = memory
         self.bot_manager = bot_manager
@@ -31,6 +37,9 @@ class JarvisCore:
         self.event_bus = event_bus
         self.read_settings = read_settings
         self.skill_manager = skill_manager
+        self.tool_invocation_handler = tool_invocation_handler
+        self.performance_monitor = performance_monitor
+        self.rag_engine = rag_engine
 
     async def handle_message(
         self,
@@ -72,6 +81,7 @@ class JarvisCore:
                     + self._skill_context(normalized)
                     + self.memory.fact_context(user.user_id)
                     + self.memory.query_context(user.user_id, normalized, limit=5)
+                    + self._rag_context(normalized)
                 )
                 history = self._conversation_history(convo.convo_id)
                 if self._truthfulness_check_enabled():
@@ -205,7 +215,8 @@ class JarvisCore:
                 self.event_bus.publish(
                     "chat.stream.end", {"conversation_id": convo_id}, transient=True
                 )
-        return "".join(parts)
+        response = "".join(parts)
+        return await self._process_tool_calls(response)
 
     def _truthfulness_check_enabled(self) -> bool:
         if self.read_settings is None:
@@ -276,6 +287,41 @@ class JarvisCore:
     @staticmethod
     def _format_context(context: list[str]) -> str:
         return "\n".join(f"- {item}" for item in context) if context else "(none)"
+
+    def _rag_context(self, text: str) -> list[str]:
+        """Retrieve context from RAG engine if available."""
+        if self.rag_engine is None:
+            return []
+        try:
+            results = self.rag_engine.query(text, top_k=3)
+            if not results:
+                return []
+            formatted = self.rag_engine.format_for_context(results)
+            if formatted:
+                return ["[RAG Document Retrieval]"] + formatted
+        except Exception:
+            pass
+        return []
+
+    async def _process_tool_calls(self, response: str) -> str:
+        """Extract tool calls from response, invoke them, and inject results."""
+        if self.tool_invocation_handler is None:
+            return response
+
+        calls = ToolCallExtractor.extract_tool_calls(response)
+        if not calls:
+            return response
+
+        clean_response = ToolCallExtractor.remove_tool_calls(response)
+        results: dict[str, Any] = {}
+
+        for call in calls:
+            result = await self.tool_invocation_handler.invoke(call.tool_id, call.params)
+            results[call.tool_id] = result
+
+        if results:
+            return ToolCallExtractor.inject_tool_results(clean_response, results)
+        return clean_response
 
     def _publish_verification(self, convo_id: int, outcome: str) -> None:
         if self.event_bus is not None:

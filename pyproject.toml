@@ -29,6 +29,18 @@ voice = [
   "piper-tts>=1.2",
   "sounddevice>=0.5",
 ]
+rag = [
+  "python-docx>=0.8",
+  "PyPDF2>=4.0",
+]
+finetuning = [
+  "torch>=2.0",
+  "peft>=0.4",
+  "datasets>=2.0",
+  "transformers>=4.30",
+  "bitsandbytes>=0.41",
+  "pyyaml>=6.0",
+]
 
 [tool.setuptools.packages.find]
 include = ["jarvis*"]

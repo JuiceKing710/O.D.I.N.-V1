@@ -1,0 +1,39 @@
+# QLoRA Fine-Tuning Configuration for O.D.I.N. Diagnostic Models
+
+model_id: "qwen:14b"                    # Base model ID from Ollama
+output_dir: "training/adapters"         # Where to save trained LoRA adapters
+data_path: "training/data/diagnostics.jsonl"  # Training data
+
+# LoRA Configuration
+lora_r: 16                              # LoRA rank
+lora_alpha: 32                          # LoRA alpha (scaling factor)
+lora_dropout: 0.05                      # Dropout rate
+target_modules:
+  - "q_proj"
+  - "v_proj"
+lora_bias: "none"
+
+# Training hyperparameters
+num_epochs: 3
+learning_rate: 5e-4
+per_device_train_batch_size: 2
+per_device_eval_batch_size: 4
+gradient_accumulation_steps: 4
+warmup_steps: 100
+weight_decay: 0.01
+logging_steps: 10
+eval_steps: 50
+save_steps: 100
+max_grad_norm: 1.0
+
+# Quantization (for memory efficiency)
+use_4bit_quantization: true
+bnb_4bit_compute_dtype: "float16"
+bnb_4bit_quant_type: "nf4"
+
+# Data split
+train_test_split: 0.9
+
+# Optional: Weights and Biases integration
+use_wandb: false
+wandb_project: "odin-diagnostics"
