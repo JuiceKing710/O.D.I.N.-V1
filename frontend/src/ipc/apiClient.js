@@ -188,6 +188,18 @@ export function generateImage({ prompt, sender = "local-user" }) {
   });
 }
 
+export function fetchSecurityStatus() {
+  return request("/api/v1/security/status");
+}
+
+export function fetchSecurityAlerts(limit = 25) {
+  return request(`/api/v1/security/alerts?limit=${encodeURIComponent(limit)}`);
+}
+
+export function runSecurityScan() {
+  return request("/api/v1/security/scan", { method: "POST" });
+}
+
 // Fire-and-poll: starts an unattended deep-research run and resolves
 // immediately with the run snapshot (run_id, status "running"). Progress
 // arrives via agent.* WebSocket events; the final report is read by polling

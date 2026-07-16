@@ -8,6 +8,7 @@ import { DataPanel } from "./components/DataPanel.jsx";
 import { MetricsRail } from "./components/MetricsRail.jsx";
 import { OdinStage } from "./components/OdinStage.jsx";
 import { ProjectDashboard } from "./components/ProjectDashboard.jsx";
+import { SecurityPanel } from "./components/SecurityPanel.jsx";
 import { SettingsPanel } from "./components/SettingsPanel.jsx";
 import { StartupHealth } from "./components/StartupHealth.jsx";
 import { TokenGate } from "./components/TokenGate.jsx";
@@ -16,6 +17,7 @@ import { connectEvents, fetchSystemOverview } from "./ipc/apiClient.js";
 import { AppStateProvider, useAppState } from "./state/appContext.jsx";
 import { useAgentStore } from "./state/agentStore.js";
 import { useChatStore } from "./state/chatStore.js";
+import { useSecurityStore } from "./state/securityStore.js";
 import { useSystemStore } from "./state/systemStore.js";
 import "./styles.css";
 
@@ -23,6 +25,7 @@ const PANELS = [
   { id: "overview", label: "Overview", glyph: "◉" },
   { id: "chat", label: "Chat", glyph: "◍" },
   { id: "agents", label: "Agents", glyph: "⬨" },
+  { id: "security", label: "Security", glyph: "⌖" },
   { id: "workflows", label: "Workflows", glyph: "⬡" },
   { id: "data", label: "Data Map", glyph: "⬢" },
   { id: "settings", label: "Configuration", glyph: "⚙" },
@@ -38,6 +41,7 @@ function App() {
   const applyEvent = useChatStore((state) => state.applyEvent);
   const applySystemEvent = useSystemStore((state) => state.applySystemEvent);
   const applyAgentEvent = useAgentStore((state) => state.applyAgentEvent);
+  const applySecurityEvent = useSecurityStore((state) => state.applyEvent);
   const setOverview = useSystemStore((state) => state.setOverview);
   const panelCounts = {
     chat: messages.length,
@@ -50,8 +54,9 @@ function App() {
         applyEvent(event);
         applySystemEvent(event);
         applyAgentEvent(event);
+        applySecurityEvent(event);
       }),
-    [applyEvent, applySystemEvent, applyAgentEvent],
+    [applyEvent, applySystemEvent, applyAgentEvent, applySecurityEvent],
   );
 
   useEffect(() => {
@@ -141,6 +146,7 @@ function App() {
             )}
             {activePanel === "chat" && <ChatView onOpenCoreFocus={() => setCoreFocus(true)} />}
             {activePanel === "agents" && <AgentsView />}
+            {activePanel === "security" && <SecurityPanel />}
             {activePanel === "workflows" && <ProjectDashboard />}
             {activePanel === "data" && <DataPanel />}
             {activePanel === "settings" && <SettingsPanel />}

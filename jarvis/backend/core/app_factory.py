@@ -301,11 +301,13 @@ def get_vision_manager() -> VisionManager:
     settings = get_settings_store().read()
     gemini_key = str(settings.get("gemini_api_key") or "").strip()
     # Local-first: prefer the on-device Ollama vision model so camera frames
-    # never leave the machine and stay fast on modest hardware. qwen3.5 small
-    # multimodal models are preferred when installed (0.8b is the fastest and
-    # lightest, 2b the best quality per GB), then moondream (~1.7 GB), then the
-    # larger fallbacks. Only installed models are considered, so the order just
-    # decides among what is already pulled.
+    # never leave the machine. The default order targets the sweet spot for the
+    # always-on security monitor — smart enough for daily use, light enough to
+    # run continuously: qwen2.5vl:7b (best all-round, ~6 GB, wants 16 GB RAM),
+    # then qwen2.5vl:3b (~3 GB, great on 8 GB), then minicpm-v (~5.5 GB), then
+    # moondream (~1.7 GB, tiny/fast fallback), then llava. Only installed models
+    # are considered, so the order just decides among what is already pulled;
+    # set JARVIS_VISION_MODEL to pin one explicitly.
     # Fall back to Gemini when no local model is present and turbo mode is on.
     # JARVIS_VISION_PROVIDER lets a low-RAM machine outsource vision to the cloud:
     #   "cloud" -> always use Gemini (skip the local model, save RAM)
@@ -316,7 +318,7 @@ def get_vision_manager() -> VisionManager:
     candidates = (
         [preferred]
         if preferred
-        else ["qwen3.5:0.8b", "qwen3.5:2b", "moondream", "llava"]
+        else ["qwen2.5vl:7b", "qwen2.5vl:3b", "minicpm-v", "moondream", "llava"]
     )
     local_model = (
         None

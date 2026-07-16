@@ -142,9 +142,13 @@ latency-sensitive; pick turbo for dictation accuracy. A wake-word-triggered stre
 mode was evaluated and deliberately not built: the measured round trip is already ~2–3 s and an
 always-resident streaming process would hold RAM the models need.
 
-Camera and screen vision run through local Ollama models. Auto-selection prefers
-`qwen3.5:0.8b` (fastest verified small VLM, ~2 s per frame warm), then `qwen3.5:2b`, then
-`moondream`/`llava`; override with `JARVIS_VISION_MODEL`. The vision model is evicted from RAM
+Camera and screen vision run through local Ollama models. The default auto-selection targets the
+sweet spot for the always-on security monitor — smart enough for daily use, light enough to run
+continuously — preferring `qwen2.5vl:7b` (best all-round, ~6 GB, wants 16 GB RAM), then
+`qwen2.5vl:3b` (~3 GB, great on 8 GB), then `minicpm-v`, then `moondream` (~1.7 GB, tiny/fast
+fallback), then `llava`. Only installed models are considered, so the order just decides among what
+you have already pulled — install one with e.g. `ollama pull qwen2.5vl:7b` (or `:3b` on a smaller
+Mac), or pin any model with `JARVIS_VISION_MODEL`. The vision model is evicted from RAM
 immediately after each analysis (`JARVIS_VISION_KEEP_ALIVE`, default `0`) so the chat model
 keeps the memory, and thinking mode is disabled per frame for latency. The Chat view's
 **Screen** button captures the display (`POST /api/v1/vision/screen`) and describes it — gated
@@ -280,9 +284,13 @@ keep `JARVIS_REQUIRE_AUTH=1` on either way.
 Odin can watch a security camera / NVR system and alert you when it sees something — a person,
 motion, a package, a vehicle — using the same local vision model, so **frames never leave the
 machine**. A background loop grabs one still frame per camera on an interval, asks the vision model
-whether any watched event is present, and on a hit publishes a live `security.alert` (shown in the
-app's activity feed with the triggering snapshot) and fires a phone push notification. A per-camera
-cooldown keeps a lingering person from re-alerting every cycle. It is **off by default**.
+whether any watched event is present, and on a hit publishes a live `security.alert` and fires a
+phone push notification. A per-camera cooldown keeps a lingering person from re-alerting every
+cycle. It is **off by default**.
+
+The app has a dedicated **Security** tab: monitor and per-camera health, the current watch list,
+a **Scan now** button to check every camera on demand, and a live gallery of recent alerts with the
+snapshot that triggered each one. Alerts also appear in the Overview activity feed as they happen.
 
 This works with any NVR/IP camera that exposes an **RTSP** stream — ZOSI, Reolink, Amcrest,
 Hikvision, Dahua, and generic ONVIF systems. Most 8-channel NVRs expose one RTSP URL per channel
