@@ -120,7 +120,10 @@ export JARVIS_TTS_COMMAND='tts-cli --text {text} --output {output_path}'
 
 Odin speaks with a local Piper neural voice when `pip install -e ".[voice]"` is installed and a
 voice model exists at `~/jarvis-models/piper/en_US-ryan-medium.onnx` (override with
-`JARVIS_PIPER_VOICE`); otherwise speech falls back to macOS `say`. An optional wake word
+`JARVIS_PIPER_VOICE`); otherwise speech falls back to macOS `say`. `start-odin.sh` points
+`JARVIS_PIPER_VOICE` at the deep British male voice `en_GB-alan-medium.onnx` on Valhalla — download
+a voice's `.onnx` *and* `.onnx.json` from [rhasspy/piper-voices](https://huggingface.co/rhasspy/piper-voices)
+to swap it. An optional wake word
 (Settings → Voice; default model `hey_jarvis`, override with `JARVIS_WAKE_MODEL` once a custom
 "Hey Odin" model is trained) listens through openwakeword and opens the chat dock when heard —
 macOS will request microphone access for the backend on first use.

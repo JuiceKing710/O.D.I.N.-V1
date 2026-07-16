@@ -352,14 +352,13 @@ class MemoryManager:
     ) -> MessageRecord:
         if not content.strip():
             raise ValueError("content is required")
-        embedding_id = None
         with self._connect() as conn:
             cursor = conn.execute(
                 """
                 INSERT INTO messages(convo_id, role, content, embedding_id)
                 VALUES (?, ?, ?, ?)
                 """,
-                (convo_id, role, content, embedding_id),
+                (convo_id, role, content, None),
             )
             row = conn.execute(
                 """
@@ -369,23 +368,19 @@ class MemoryManager:
                 """,
                 (cursor.lastrowid,),
             ).fetchone()
-            message = self._message_from_row(row)
-            embedding_id = self._safe_upsert_message(message)
-            if embedding_id is not None:
+        message = self._message_from_row(row)
+        # Embed after the write commits and the db_lock is released: the Ollama
+        # call can block for seconds and must not stall other DB users.
+        embedding_id = self._safe_upsert_message(message)
+        if embedding_id is not None:
+            with self._connect() as conn:
                 conn.execute(
                     "UPDATE messages SET embedding_id = ? WHERE msg_id = ?",
                     (embedding_id, message.msg_id),
                 )
-                row = conn.execute(
-                    """
-                    SELECT msg_id, convo_id, role, content, embedding_id, created_at
-                    FROM messages
-                    WHERE msg_id = ?
-                    """,
-                    (message.msg_id,),
-                ).fetchone()
+            message.embedding_id = embedding_id
         self.cache.clear()
-        return self._message_from_row(row)
+        return message
 
     def query_messages(self, user_id: int, query: str, limit: int = 5) -> list[MessageRecord]:
         cache_key = f"{user_id}:{query}:{limit}"
@@ -445,23 +440,18 @@ class MemoryManager:
                 """,
                 (cleaned_id,),
             ).fetchone()
-            document = self._document_from_row(row)
-            embedding_id = self._safe_upsert_document(document)
-            if embedding_id is not None:
+        document = self._document_from_row(row)
+        # Embed after the write commits and the db_lock is released (see add_message).
+        embedding_id = self._safe_upsert_document(document)
+        if embedding_id is not None:
+            with self._connect() as conn:
                 conn.execute(
                     "UPDATE documents SET embedding_id = ? WHERE document_id = ?",
                     (embedding_id, cleaned_id),
                 )
-                row = conn.execute(
-                    """
-                    SELECT document_id, user_id, source, content, embedding_id, created_at
-                    FROM documents
-                    WHERE document_id = ?
-                    """,
-                    (cleaned_id,),
-                ).fetchone()
+            document.embedding_id = embedding_id
         self.cache.clear()
-        return self._document_from_row(row)
+        return document
 
     def query_documents(self, user_id: int, query: str, limit: int = 5) -> list[DocumentRecord]:
         vector_records = self._query_vector_documents(user_id, query, limit)
@@ -727,9 +717,10 @@ class MemoryManager:
                 """,
                 (cursor.lastrowid,),
             ).fetchone()
-            task = self._task_from_row(row)
-            self._safe_upsert_task(task)
-        return self._task_from_row(row)
+        task = self._task_from_row(row)
+        # Embed after the write commits and the db_lock is released (see add_message).
+        self._safe_upsert_task(task)
+        return task
 
     def list_tasks(self, user_id: int) -> list[TaskRecord]:
         with self._connect() as conn:
@@ -789,8 +780,9 @@ class MemoryManager:
                 """,
                 (task_id, user_id),
             ).fetchone()
-            task = self._task_from_row(row)
-            self._safe_upsert_task(task)
+        task = self._task_from_row(row)
+        # Embed after the write commits and the db_lock is released (see add_message).
+        self._safe_upsert_task(task)
         return task
 
     def list_conversation_messages(self, convo_id: int) -> list[MessageRecord]:
