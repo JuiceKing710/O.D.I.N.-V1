@@ -58,6 +58,22 @@ def candidate_paths(channel: int, substream: bool) -> list[str]:
     ]
 
 
+def parse_ports(raw: str) -> list[int]:
+    """Parse a comma-separated port list (e.g. '554,5000') into unique ints."""
+    ports: list[int] = []
+    for piece in str(raw).split(","):
+        piece = piece.strip()
+        if not piece:
+            continue
+        try:
+            port = int(piece)
+        except ValueError:
+            continue
+        if port not in ports:
+            ports.append(port)
+    return ports or [554]
+
+
 def build_url(ip: str, port: int, user: str, password: str, path: str) -> str:
     """Assemble an rtsp:// URL, URL-encoding credentials for @/: safety."""
     creds = ""
@@ -102,7 +118,7 @@ def probe_url(url: str, ffprobe: str = "ffprobe", timeout: float = 8.0) -> bool:
 
 def discover_channel(
     ip: str,
-    port: int,
+    ports: list[int],
     user: str,
     password: str,
     channel: int,
@@ -110,20 +126,25 @@ def discover_channel(
     ffprobe: str,
     timeout: float,
 ) -> str | None:
-    for path in candidate_paths(channel, substream):
-        url = build_url(ip, port, user, password, path)
-        print(f"  channel {channel}: trying {redact_url(url)} … ", end="", flush=True)
-        if probe_url(url, ffprobe=ffprobe, timeout=timeout):
-            print("OK")
-            return url
-        print("no")
+    for port in ports:
+        for path in candidate_paths(channel, substream):
+            url = build_url(ip, port, user, password, path)
+            print(f"  channel {channel}: trying {redact_url(url)} … ", end="", flush=True)
+            if probe_url(url, ffprobe=ffprobe, timeout=timeout):
+                print("OK")
+                return url
+            print("no")
     return None
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Discover NVR RTSP URLs for Odin.")
     parser.add_argument("--ip", required=True, help="NVR IP address on your LAN")
-    parser.add_argument("--port", type=int, default=554, help="RTSP port (default 554)")
+    parser.add_argument(
+        "--port",
+        default="554,5000",
+        help="RTSP port(s) to try, comma-separated (default '554,5000')",
+    )
     parser.add_argument("--channels", type=int, default=8, help="Number of cameras/channels")
     parser.add_argument("--user", default=None, help="NVR username (prompted if omitted)")
     parser.add_argument(
@@ -142,16 +163,25 @@ def main() -> int:
     user = args.user if args.user is not None else input("NVR username: ").strip()
     password = args.password if args.password is not None else getpass.getpass("NVR password: ")
     substream = not args.main
+    ports = parse_ports(args.port)
 
-    print(f"\nProbing {args.channels} channel(s) on {args.ip}:{args.port} "
-          f"({'sub' if substream else 'main'} stream)…\n")
+    print(f"\nProbing {args.channels} channel(s) on {args.ip} port(s) "
+          f"{','.join(str(p) for p in ports)} ({'sub' if substream else 'main'} stream)…\n")
     cameras = []
+    working_port: int | None = None
     for channel in range(1, args.channels + 1):
+        # Once one channel works, try that port first for the rest — the RTSP
+        # port is device-wide, so this skips the dead-port retries.
+        ordered = ([working_port] + [p for p in ports if p != working_port]) if working_port else ports
         url = discover_channel(
-            args.ip, args.port, user, password, channel, substream, args.ffprobe, args.timeout
+            args.ip, ordered, user, password, channel, substream, args.ffprobe, args.timeout
         )
         if url:
             cameras.append({"name": f"Camera {channel}", "url": url})
+            try:
+                working_port = urlsplit(url).port or working_port
+            except ValueError:
+                pass
         else:
             print(f"  channel {channel}: no working URL found — skipping")
 

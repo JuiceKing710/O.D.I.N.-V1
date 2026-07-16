@@ -319,13 +319,16 @@ brew install ffmpeg
 ]
 ```
 
-Not sure of your NVR's exact RTSP path? Run the discovery helper on a machine on the same LAN — it
-probes each channel with the common URL patterns and writes `data/cameras.json` for the ones that
-return video (the password is prompted, hidden, and only written to the local file):
+Not sure of your NVR's exact RTSP path or port? Run the discovery helper on a machine on the same
+LAN — it probes each channel with the common URL patterns across the common RTSP ports (554 and 5000
+by default) and writes `data/cameras.json` for the ones that return video (the password is prompted,
+hidden, and only written to the local file):
 
 ```bash
-PYTHONPATH=. .venv/bin/python scripts/setup_cameras.py --ip 192.168.1.50 --channels 8
+PYTHONPATH=. .venv/bin/python scripts/setup_cameras.py --ip 192.168.1.10 --channels 8
 ```
+
+Override the ports it tries with e.g. `--port 554,5000,8554`.
 
 **4. Set up phone push (optional but recommended for when you're away).** Install the free
 [ntfy](https://ntfy.sh/) app on your phone and subscribe to an unguessable topic; give Odin the same

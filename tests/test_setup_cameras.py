@@ -5,6 +5,7 @@ import unittest
 from scripts.setup_cameras import (
     build_url,
     candidate_paths,
+    parse_ports,
     probe_ok,
     redact_url,
 )
@@ -36,6 +37,12 @@ class SetupCamerasTests(unittest.TestCase):
         redacted = redact_url("rtsp://admin:secret@192.168.1.50:554/ch01/0")
         self.assertNotIn("secret", redacted)
         self.assertIn("192.168.1.50:554", redacted)
+
+    def test_parse_ports_handles_lists_and_junk(self) -> None:
+        self.assertEqual(parse_ports("554,5000"), [554, 5000])
+        self.assertEqual(parse_ports("5000"), [5000])
+        self.assertEqual(parse_ports("554, 554 , x"), [554])  # dedupe + skip junk
+        self.assertEqual(parse_ports(""), [554])  # sensible fallback
 
     def test_probe_ok_requires_success_and_video(self) -> None:
         self.assertTrue(probe_ok(0, "codec_type=video\n"))
