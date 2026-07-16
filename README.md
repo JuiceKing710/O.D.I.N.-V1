@@ -213,6 +213,68 @@ Local frontend origins are allowed by default for development and preview. Overr
 export JARVIS_ALLOWED_ORIGINS=http://127.0.0.1:4173,http://127.0.0.1:5173
 ```
 
+### Remote access from your phone
+
+Odin can be reached from your phone while you're away from home. The whole web UI is served by the
+backend itself, so the phone loads it same-origin and talks to Odin the same way the desktop does —
+no separate app to install. Because that exposes an API that can run commands, read files, and see
+the camera/screen, remote access is **off by default** and gated behind a shared token. Never
+port-forward the raw backend to the public internet; use a private network (Tailscale) instead.
+
+**One-time setup**
+
+1. Install [Tailscale](https://tailscale.com/) on the Mac running Odin and on your phone, and sign
+   both into the same tailnet. This gives them a private encrypted link with no ports opened to the
+   internet.
+2. Turn on remote auth and pick a token (or let one be generated at `data/api.key` — with the
+   Valhalla launcher, `$ODIN_DATA/api.key`):
+
+   ```bash
+   export JARVIS_REQUIRE_AUTH=1
+   export JARVIS_API_TOKEN="$(openssl rand -base64 32)"   # optional; omit to auto-generate
+   ```
+
+3. Build the web UI so the backend can serve it (rebuild after frontend changes):
+
+   ```bash
+   cd frontend && npm run build
+   ```
+
+4. Start the backend listening on all interfaces so Tailscale can reach it:
+
+   ```bash
+   ./start-odin.sh backend --host 0.0.0.0 --port 8000
+   ```
+
+5. Publish it over HTTPS on your tailnet with a real certificate:
+
+   ```bash
+   tailscale serve https / http://127.0.0.1:8000
+   ```
+
+   HTTPS matters: browsers only allow microphone/voice input on a secure origin, so text chat works
+   over plain `http://<machine>:8000` within the tailnet but **voice needs the `tailscale serve`
+   HTTPS address**. `tailscale serve status` prints the `https://<machine>.<tailnet>.ts.net` URL.
+
+**Connecting the phone**
+
+With Tailscale active on the phone, open the `https://<machine>.<tailnet>.ts.net` address in the
+phone's browser. The first request prompts for the access token; copy it from the Mac under
+**Settings → Remote Access** (Configuration panel) and paste it in once. It is stored on that device
+so you won't be asked again until you clear it. Keep the token private — it grants full access to
+Odin, and anyone with it can act as you.
+
+Auth is enforced by a token middleware (`JARVIS_REQUIRE_AUTH`, `JARVIS_API_TOKEN`,
+`JARVIS_API_TOKEN_PATH`) that gates everything under `/api/` with a constant-time comparison; the
+served UI and the `/healthz` liveness probe stay open so the phone can load the page and present the
+token. The token may be supplied as an `Authorization: Bearer` header, an `X-Odin-Token` header, or a
+`?token=` query parameter (the WebSocket event stream uses the query form, since browsers can't set
+headers on a WebSocket). With auth off, the middleware is a no-op and local use is unchanged.
+
+[Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/)
+works as an alternative to Tailscale if you want a public hostname instead of a private tailnet —
+keep `JARVIS_REQUIRE_AUTH=1` on either way.
+
 ## Frontend
 
 ```bash
