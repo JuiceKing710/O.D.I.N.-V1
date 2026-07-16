@@ -79,6 +79,21 @@ describe("systemStore", () => {
     expect(activity[0].source).toBe("Automation Hub");
   });
 
+  it("surfaces a security alert in the activity stream", () => {
+    useSystemStore.getState().applySystemEvent({
+      id: "evt-sec",
+      type: "security.alert",
+      created_at: new Date().toISOString(),
+      payload: { camera: "Front Door", summary: "a person on the porch" },
+    });
+
+    const [entry] = useSystemStore.getState().activity;
+    expect(entry.source).toBe("Optical Detection");
+    expect(entry.detail).toContain("Front Door");
+    expect(entry.detail).toContain("a person on the porch");
+    expect(useSystemStore.getState().nodeActivity.security_mesh).toBeTypeOf("number");
+  });
+
   it("stamps subsystem activity for branch lighting", () => {
     const apply = useSystemStore.getState().applySystemEvent;
     apply({ id: "evt-4", type: "voice.wake", created_at: new Date().toISOString(), payload: {} });

@@ -53,6 +53,8 @@ from jarvis.backend.api.models import (
     ResearchAgentRequest,
     ResearchRunResponse,
     SafetyStatusResponse,
+    SecurityAlertResponse,
+    SecurityStatusResponse,
     SettingsResponse,
     SettingsUpdateRequest,
     SkillInfoResponse,
@@ -84,6 +86,7 @@ from jarvis.backend.core.app_factory import (
     get_agent_manager,
     get_backup_scheduler,
     get_audit_logger,
+    get_camera_monitor,
     get_core,
     get_event_bus,
     get_heartbeat_engine,
@@ -105,6 +108,7 @@ from jarvis.backend.core.memory_consolidator import MemoryConsolidator
 from jarvis.backend.core.wake_word import WakeWordListener
 from jarvis.backend.core.backup_scheduler import BackupScheduler
 from jarvis.backend.core.bot_manager import BotMessage
+from jarvis.backend.core.camera_monitor import CameraMonitor
 from jarvis.backend.core.event_bus import EventBus
 from jarvis.backend.core.image_manager import ImageManager
 from jarvis.backend.core.jarvis_core import JarvisCore
@@ -1219,6 +1223,46 @@ def image_file(
     if image_path.parent != output_dir or not image_path.is_file():
         raise HTTPException(status_code=404, detail=f"Image not found: {filename}")
     return FileResponse(image_path)
+
+
+@router.get("/security/status", response_model=SecurityStatusResponse)
+def security_status(
+    monitor: CameraMonitor = Depends(get_camera_monitor),
+) -> SecurityStatusResponse:
+    return SecurityStatusResponse(**monitor.status())
+
+
+@router.get("/security/alerts", response_model=list[SecurityAlertResponse])
+def security_alerts(
+    limit: int = 25,
+    monitor: CameraMonitor = Depends(get_camera_monitor),
+) -> list[SecurityAlertResponse]:
+    return [
+        SecurityAlertResponse(**alert.to_api())
+        for alert in monitor.recent_alerts(limit=max(1, min(limit, 100)))
+    ]
+
+
+@router.post("/security/scan", response_model=list[SecurityAlertResponse])
+async def security_scan(
+    monitor: CameraMonitor = Depends(get_camera_monitor),
+) -> list[SecurityAlertResponse]:
+    # On-demand sweep of every configured camera — used to validate setup and to
+    # let the user "check now" without waiting for the next loop cycle.
+    alerts = await monitor.scan_all()
+    return [SecurityAlertResponse(**alert.to_api()) for alert in alerts]
+
+
+@router.get("/security/capture/{filename}")
+def security_capture(
+    filename: str,
+    monitor: CameraMonitor = Depends(get_camera_monitor),
+) -> FileResponse:
+    capture_dir = Path(monitor.capture_dir).resolve()
+    capture_path = (capture_dir / filename).resolve()
+    if capture_path.parent != capture_dir or not capture_path.is_file():
+        raise HTTPException(status_code=404, detail=f"Capture not found: {filename}")
+    return FileResponse(capture_path)
 
 
 @router.post("/agent/research", response_model=ResearchRunResponse, status_code=202)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import secrets
 import shutil
@@ -17,7 +18,14 @@ from jarvis.backend.bots.research_bot import ResearchBot
 from jarvis.backend.bots.system_bot import SystemBot
 from jarvis.backend.core.backup_scheduler import BackupScheduler
 from jarvis.backend.core.bot_manager import BotManager
+from jarvis.backend.core.camera_monitor import CameraMonitor
+from jarvis.backend.core.camera_source import (
+    CameraSource,
+    RTSPCameraSource,
+    UnconfiguredCameraSource,
+)
 from jarvis.backend.core.event_bus import EventBus
+from jarvis.backend.core.notifier import NtfyNotifier, Notifier, UnconfiguredNotifier
 from jarvis.backend.core.file_snapshot import FileSnapshotStore
 from jarvis.backend.core.jarvis_core import JarvisCore
 from jarvis.backend.core.lm_provider import EchoLMProvider, OllamaProvider, TurboSwitchProvider
@@ -336,6 +344,97 @@ def get_vision_manager() -> VisionManager:
     else:
         adapter = UnconfiguredVisionAdapter()
     return VisionManager(adapter=adapter, event_bus=get_event_bus())
+
+
+def _load_camera_sources() -> list[CameraSource]:
+    """Build camera sources from the JSON config at JARVIS_CAMERA_CONFIG.
+
+    The file is a list of ``{"name": ..., "url": "rtsp://..."}`` objects (one per
+    NVR channel). Missing/empty file → no sources (monitor idles). When ffmpeg is
+    absent every camera becomes an UnconfiguredCameraSource so status still lists
+    it with a clear reason instead of the backend failing to start.
+    """
+    config_path = Path(os.environ.get("JARVIS_CAMERA_CONFIG", "data/cameras.json"))
+    if not config_path.is_file():
+        return []
+    try:
+        raw = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    entries = raw if isinstance(raw, list) else raw.get("cameras", [])
+    ffmpeg = shutil.which(os.environ.get("JARVIS_FFMPEG", "ffmpeg")) or os.environ.get(
+        "JARVIS_FFMPEG"
+    )
+    try:
+        grab_timeout = float(os.environ.get("JARVIS_SECURITY_GRAB_TIMEOUT_SECONDS", "20"))
+    except ValueError:
+        grab_timeout = 20.0
+    sources: list[CameraSource] = []
+    for index, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            continue
+        name = str(entry.get("name") or f"camera-{index + 1}").strip()
+        url = str(entry.get("url") or "").strip()
+        if not url:
+            sources.append(UnconfiguredCameraSource(name, "no RTSP url in config"))
+            continue
+        if not ffmpeg:
+            sources.append(UnconfiguredCameraSource(name, "ffmpeg not installed"))
+            continue
+        sources.append(
+            RTSPCameraSource(
+                name=name,
+                url=url,
+                ffmpeg=ffmpeg,
+                timeout_seconds=grab_timeout,
+                transport=str(entry.get("transport") or "tcp"),
+            )
+        )
+    return sources
+
+
+@lru_cache(maxsize=1)
+def get_notifier() -> Notifier:
+    """Phone push channel: ntfy when a topic is set, else a no-op.
+
+    Live alerts always ride the event bus regardless; this only governs the
+    "push to phone with the app closed" channel.
+    """
+    topic = os.environ.get("JARVIS_NTFY_TOPIC", "").strip()
+    if not topic:
+        return UnconfiguredNotifier()
+    return NtfyNotifier(
+        topic=topic,
+        base_url=os.environ.get("JARVIS_NTFY_URL", "https://ntfy.sh"),
+        token=os.environ.get("JARVIS_NTFY_TOKEN"),
+    )
+
+
+@lru_cache(maxsize=1)
+def get_camera_monitor() -> CameraMonitor:
+    try:
+        interval = float(os.environ.get("JARVIS_SECURITY_INTERVAL_SECONDS", "30"))
+    except ValueError:
+        interval = 30.0
+    try:
+        cooldown = float(os.environ.get("JARVIS_SECURITY_COOLDOWN_SECONDS", "180"))
+    except ValueError:
+        cooldown = 180.0
+    watch_raw = os.environ.get("JARVIS_SECURITY_WATCH", "").strip()
+    watch_for = [item.strip() for item in watch_raw.split(";") if item.strip()] or None
+    return CameraMonitor(
+        _load_camera_sources(),
+        get_vision_manager(),
+        event_bus=get_event_bus(),
+        notifier=get_notifier(),
+        capture_dir=Path(os.environ.get("JARVIS_SECURITY_CAPTURE_DIR", "data/security")),
+        interval_seconds=max(interval, 1.0),
+        cooldown_seconds=max(cooldown, 0.0),
+        watch_for=watch_for,
+        enabled=os.environ.get("JARVIS_SECURITY_MONITOR", "disabled").lower()
+        in {"1", "true", "yes", "on", "enabled"},
+        max_captures=_env_int("JARVIS_SECURITY_MAX_CAPTURES", 100),
+    )
 
 
 @lru_cache(maxsize=1)

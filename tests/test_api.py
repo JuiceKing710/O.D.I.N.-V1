@@ -28,6 +28,7 @@ from jarvis.backend.bots.system_bot import SystemBot
 from jarvis.backend.core.app_factory import (
     get_audit_logger,
     get_backup_scheduler,
+    get_camera_monitor,
     get_core,
     get_event_bus,
     get_heartbeat_engine,
@@ -42,6 +43,7 @@ from jarvis.backend.core.app_factory import (
     get_voice_manager,
     get_wake_word_listener,
 )
+from jarvis.backend.core.camera_monitor import CameraMonitor
 from jarvis.backend.core.image_manager import ImageManager, StubImageAdapter
 from jarvis.backend.core.system_monitor import SystemMonitor
 from jarvis.backend.core.backup_scheduler import BackupScheduler
@@ -215,6 +217,10 @@ class ApiTests(unittest.TestCase):
         app.dependency_overrides[get_voice_manager] = lambda: self.voice
         app.dependency_overrides[get_vision_manager] = lambda: self.vision
         app.dependency_overrides[get_image_manager] = lambda: self.image_manager
+        self.camera_monitor = CameraMonitor(
+            [], self.vision, event_bus=self.event_bus, capture_dir=base / "security"
+        )
+        app.dependency_overrides[get_camera_monitor] = lambda: self.camera_monitor
         self.client = TestClient(app)
 
     def tearDown(self) -> None:
@@ -281,6 +287,64 @@ class ApiTests(unittest.TestCase):
         served = self.client.get(body["image_url"])
         self.assertEqual(served.status_code, 200)
         self.assertTrue(served.content)
+
+    def test_security_status_endpoint_reports_monitor(self) -> None:
+        response = self.client.get("/api/v1/security/status")
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertFalse(body["enabled"])
+        self.assertFalse(body["running"])
+        self.assertEqual(body["cameras"], [])
+        self.assertIn("watch_for", body)
+
+    def test_security_scan_and_capture_flow(self) -> None:
+        # Point the monitor at a fake camera + canned vision so a scan raises a
+        # real alert, then confirm the alert lists and its capture serves.
+        from jarvis.backend.core.camera_monitor import CameraMonitor
+        from jarvis.backend.core.vision_manager import VisionManager
+
+        class _Adapter:
+            name = "fake"
+            configured = True
+
+            def analyze(self, image_path, prompt):
+                return "ALERT: a person at the door"
+
+        class _Cam:
+            name = "Front"
+            configured = True
+
+            def grab_frame(self):
+                return b"jpegframe"
+
+        base = Path(self.tmp.name)
+        self.camera_monitor = CameraMonitor(
+            [_Cam()],
+            VisionManager(adapter=_Adapter()),
+            event_bus=self.event_bus,
+            capture_dir=base / "security2",
+            enabled=True,
+        )
+        self.client.app.dependency_overrides[get_camera_monitor] = lambda: self.camera_monitor
+
+        scanned = self.client.post("/api/v1/security/scan")
+        self.assertEqual(scanned.status_code, 200)
+        alerts = scanned.json()
+        self.assertEqual(len(alerts), 1)
+        self.assertEqual(alerts[0]["camera"], "Front")
+
+        listed = self.client.get("/api/v1/security/alerts")
+        self.assertEqual(listed.status_code, 200)
+        self.assertEqual(len(listed.json()), 1)
+
+        capture_url = alerts[0]["image_url"]
+        served = self.client.get(capture_url)
+        self.assertEqual(served.status_code, 200)
+        self.assertTrue(served.content)
+
+    def test_security_capture_rejects_path_traversal(self) -> None:
+        response = self.client.get("/api/v1/security/capture/..%2f..%2fetc%2fpasswd")
+        self.assertIn(response.status_code, (400, 404))
 
     def test_research_agent_fire_and_poll(self) -> None:
         import time

@@ -275,6 +275,69 @@ headers on a WebSocket). With auth off, the middleware is a no-op and local use 
 works as an alternative to Tailscale if you want a public hostname instead of a private tailnet —
 keep `JARVIS_REQUIRE_AUTH=1` on either way.
 
+### Security camera monitor
+
+Odin can watch a security camera / NVR system and alert you when it sees something — a person,
+motion, a package, a vehicle — using the same local vision model, so **frames never leave the
+machine**. A background loop grabs one still frame per camera on an interval, asks the vision model
+whether any watched event is present, and on a hit publishes a live `security.alert` (shown in the
+app's activity feed with the triggering snapshot) and fires a phone push notification. A per-camera
+cooldown keeps a lingering person from re-alerting every cycle. It is **off by default**.
+
+This works with any NVR/IP camera that exposes an **RTSP** stream — ZOSI, Reolink, Amcrest,
+Hikvision, Dahua, and generic ONVIF systems. Most 8-channel NVRs expose one RTSP URL per channel
+behind a single IP.
+
+**1. Put the NVR on your network and enable RTSP.** Connect the NVR to your router by Ethernet
+(this keeps footage on your LAN — it is *not* exposing cameras to the internet), give it a static IP
+or a DHCP reservation, and enable RTSP/ONVIF in the NVR's network settings. Note the RTSP port
+(usually 554) and the stream path — for ZOSI it's typically
+`rtsp://<user>:<password>@<nvr-ip>:554/ch0<N>/0` for channel *N* (main stream) or `.../ch0<N>/1`
+for the lighter sub-stream. Confirm a URL works with `ffplay "<rtsp-url>"` before wiring it in.
+
+**2. Install ffmpeg** (used to grab one frame without holding the stream open):
+
+```bash
+brew install ffmpeg
+```
+
+**3. List your cameras** in a JSON file (default `data/cameras.json`, override with
+`JARVIS_CAMERA_CONFIG`). Use the sub-stream to keep it light; `transport` defaults to `tcp`:
+
+```json
+[
+  { "name": "Front Door", "url": "rtsp://admin:PASSWORD@192.168.1.50:554/ch01/1" },
+  { "name": "Driveway",   "url": "rtsp://admin:PASSWORD@192.168.1.50:554/ch02/1" }
+]
+```
+
+**4. Set up phone push (optional but recommended for when you're away).** Install the free
+[ntfy](https://ntfy.sh/) app on your phone and subscribe to an unguessable topic; give Odin the same
+topic. Anyone who knows the topic can read the alerts, so treat it like the access token. A
+self-hosted ntfy server works too via `JARVIS_NTFY_URL`/`JARVIS_NTFY_TOKEN`. Without this, alerts
+still appear live in the Odin app.
+
+**5. Turn the monitor on** and start the backend:
+
+```bash
+export JARVIS_SECURITY_MONITOR=enabled
+export JARVIS_NTFY_TOPIC=odin-a7f3k9-alerts      # optional: phone push
+./start-odin.sh backend --host 0.0.0.0 --port 8000
+```
+
+Tuning env vars: `JARVIS_SECURITY_INTERVAL_SECONDS` (scan cadence, default 30),
+`JARVIS_SECURITY_COOLDOWN_SECONDS` (per-camera quiet window after an alert, default 180),
+`JARVIS_SECURITY_WATCH` (`;`-separated list of things to flag; defaults to people/motion/packages/
+vehicles), `JARVIS_SECURITY_CAPTURE_DIR` (where triggering frames are saved, default `data/security`),
+`JARVIS_SECURITY_MAX_CAPTURES` (rolling cap, default 100), and `JARVIS_SECURITY_GRAB_TIMEOUT_SECONDS`
+(per-frame ffmpeg timeout, default 20). A local vision model must be installed (see the vision
+section) for detection to run.
+
+Endpoints: `GET /api/v1/security/status` (monitor + per-camera health), `GET /api/v1/security/alerts`
+(recent alerts), `POST /api/v1/security/scan` (check every camera now — useful to validate setup),
+and `GET /api/v1/security/capture/{name}` (a saved snapshot). Because these live under `/api/`, the
+remote-access token gates them too, so you can check your cameras from your phone over Tailscale.
+
 ## Frontend
 
 ```bash

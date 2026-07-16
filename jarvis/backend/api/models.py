@@ -170,6 +170,35 @@ class ConversationMessageResponse(BaseModel):
     image_url: str | None = None
 
 
+class SecurityCameraStatus(BaseModel):
+    name: str
+    configured: bool
+    last_error: str | None = None
+    last_scanned_at: str | None = None
+
+
+class SecurityStatusResponse(BaseModel):
+    enabled: bool
+    running: bool
+    interval_seconds: float
+    cooldown_seconds: float
+    watch_for: list[str]
+    notifier: str
+    push_enabled: bool
+    cameras: list[SecurityCameraStatus]
+    alert_count: int
+    last_alert_at: str | None = None
+    last_error: str | None = None
+
+
+class SecurityAlertResponse(BaseModel):
+    alert_id: str
+    camera: str
+    at: datetime
+    summary: str
+    image_url: str | None = None
+
+
 class BotExecRequest(BaseModel):
     action: str = Field(min_length=1)
     payload: dict[str, Any] = Field(default_factory=dict)

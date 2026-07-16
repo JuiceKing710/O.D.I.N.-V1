@@ -12,6 +12,7 @@ const ACTIVITY_LABELS = {
   "permission.requested": "Security Mesh",
   "permission.resolved": "Security Mesh",
   "bot.dispatched": "Automation Hub",
+  "security.alert": "Optical Detection",
 };
 
 // Subsystems each event type touches, used to light up the matching
@@ -28,6 +29,7 @@ const EVENT_SUBSYSTEMS = {
   "backup.failed": ["recovery_core"],
   "permission.requested": ["security_mesh"],
   "permission.resolved": ["security_mesh"],
+  "security.alert": ["security_mesh"],
   "system.metrics": ["system_heartbeat"],
 };
 
@@ -87,6 +89,10 @@ function describeEvent(event) {
   }
   if (event.type.startsWith("permission")) {
     return `${event.payload.permission || "permission"} ${event.type.split(".")[1] || ""}`;
+  }
+  if (event.type === "security.alert") {
+    const camera = event.payload.camera || "camera";
+    return `⚠ ${camera}: ${String(event.payload.summary || "motion detected").slice(0, 80)}`;
   }
   return event.type;
 }
