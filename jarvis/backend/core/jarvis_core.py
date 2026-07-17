@@ -415,6 +415,8 @@ class JarvisCore:
             (r"^(?:analyze code|analyze file)\s+(.+)$", "code", "analyze"),
             (r"^(?:read file|open file)\s+(.+)$", "file", "read"),
             (r"^(?:run command|execute command)\s+(.+)$", "system", "execute"),
+            (r"^(?:open|launch|activate)\s+(?:app|application)?\s*(.+)$", "desktop", "activate"),
+            (r"^(?:type|keystroke)\s+(.+)$", "desktop", "keystroke"),
             (
                 r"^(?:generate|draw|create|make|paint)\s+(?:an?\s+)?(?:image|picture|drawing|painting)\s+(?:of\s+|showing\s+|with\s+)?(.+)$",
                 "image",
