@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from abc import ABC, abstractmethod
-from dataclasses import dataclass, asdict, is_dataclass
+from dataclasses import is_dataclass
 from typing import Any, Type, TypeVar
 
 from pydantic import BaseModel, ValidationError

@@ -1,9 +1,8 @@
 """Tests for new features: JSON output, tools, RAG, and performance optimization."""
 
 import asyncio
-import json
 import unittest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 from jarvis.backend.core.json_output import (
     JSONOutputFormatter,

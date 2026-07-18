@@ -76,7 +76,7 @@ def evaluate_adapter(
             inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
             with torch.no_grad():
                 outputs = model.generate(**inputs, max_length=200, temperature=0.7)
-            generated = tokenizer.decode(outputs[0], skip_special_tokens=True)
+            tokenizer.decode(outputs[0], skip_special_tokens=True)
 
             try:
                 expected_obj = json.loads(expected)

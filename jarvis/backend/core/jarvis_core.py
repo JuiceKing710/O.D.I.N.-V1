@@ -11,7 +11,7 @@ from jarvis.backend.core.lm_provider import LMProviderInterface
 from jarvis.backend.core.memory_manager import MemoryManager
 from jarvis.backend.core.skill_manager import SkillManager
 from jarvis.backend.core.tool_provider import ToolInvocationHandler, ToolCallExtractor
-from jarvis.backend.core.inference_optimizer import KVCacheOptimizer, PerformanceMonitor
+from jarvis.backend.core.inference_optimizer import PerformanceMonitor
 from jarvis.backend.core.rag_engine import RAGEngine
 from jarvis.backend.utils.audit_logging import AuditLogger
 
