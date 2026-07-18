@@ -69,7 +69,6 @@ def evaluate_adapter(
         try:
             instruction = example.get("instruction", "")
             input_text = example.get("input", "")
-            expected = example.get("output", "")
 
             prompt = f"### Instruction:\n{instruction}\n\n### Input:\n{input_text}\n\n### Output:\n"
 
@@ -77,13 +76,15 @@ def evaluate_adapter(
             with torch.no_grad():
                 outputs = model.generate(**inputs, max_length=200, temperature=0.7)
             generated = tokenizer.decode(outputs[0], skip_special_tokens=True)
+            # The decoded text includes the prompt; score only the model's completion.
+            response = generated.split("### Output:")[-1].strip()
 
             try:
-                expected_obj = json.loads(expected)
+                generated_obj = json.loads(response)
                 metrics["evaluated"] += 1
-                total_confidence += expected_obj.get("confidence", 0.0)
+                total_confidence += generated_obj.get("confidence", 0.0)
             except json.JSONDecodeError:
-                metrics["errors"].append(f"Example {i}: Invalid expected JSON")
+                metrics["errors"].append(f"Example {i}: Invalid generated JSON")
 
         except Exception as e:
             metrics["errors"].append(f"Example {i}: {str(e)}")

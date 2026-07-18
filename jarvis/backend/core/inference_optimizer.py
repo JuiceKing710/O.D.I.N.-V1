@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import logging
-import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 
 logger = logging.getLogger(__name__)
+
+
+def _estimate_tokens(message: dict[str, str]) -> int:
+    """Rough token estimate: whitespace-delimited word count of the message content."""
+    return len(message.get("content", "").split())
 
 
 @dataclass(slots=True)
@@ -67,12 +71,11 @@ class KVCacheOptimizer:
         other_msgs = [m for m in messages if m.get("role") != "system"]
 
         if strategy == "recent":
-            estimate_tokens = lambda m: len(m.get("content", "").split())
-            total = sum(estimate_tokens(m) for m in system_msgs)
+            total = sum(_estimate_tokens(m) for m in system_msgs)
             kept = list(system_msgs)
 
             for msg in reversed(other_msgs):
-                msg_tokens = estimate_tokens(msg)
+                msg_tokens = _estimate_tokens(msg)
                 if total + msg_tokens > max_tokens:
                     break
                 kept.insert(len(system_msgs), msg)
@@ -90,8 +93,7 @@ class KVCacheOptimizer:
         if not messages or len(messages) <= 2:
             return messages
 
-        estimate_tokens = lambda m: len(m.get("content", "").split())
-        total_tokens = sum(estimate_tokens(m) for m in messages)
+        total_tokens = sum(_estimate_tokens(m) for m in messages)
 
         if total_tokens <= window_size:
             return messages
@@ -100,10 +102,10 @@ class KVCacheOptimizer:
         user_assistant_msgs = [m for m in messages if m.get("role") != "system"]
 
         kept = list(system_msgs)
-        tokens_used = sum(estimate_tokens(m) for m in system_msgs)
+        tokens_used = sum(_estimate_tokens(m) for m in system_msgs)
 
         for msg in reversed(user_assistant_msgs):
-            msg_tokens = estimate_tokens(msg)
+            msg_tokens = _estimate_tokens(msg)
             if tokens_used + msg_tokens > window_size:
                 break
             kept.insert(len(system_msgs), msg)
